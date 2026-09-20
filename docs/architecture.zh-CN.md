@@ -145,7 +145,7 @@ flowchart TD
   probed --> items["CompletionItems<br/>':' 只保留函数"]
 ```
 
-`moduleResolver` 在所属工作区根目录和源文件的各级父目录下查找 `?.lua` 和 `?/init.lua`,未保存的打开文档优先于磁盘内容,并限制文件大小和依赖深度。这样找到的定义同时支撑跨文件的转到定义。
+`moduleResolver` 优先使用扩展传入的当前环境搜索路径（项目依赖目录、解释器 `package.path`），再在所属工作区根目录和源文件的各级父目录下查找 `?.lua` 和 `?/init.lua`。路径按工作区隔离，未保存的打开文档优先于磁盘内容,并限制文件大小和依赖深度。这样找到的定义同时支撑跨文件的转到定义。
 
 ### CodeLens
 
@@ -303,3 +303,11 @@ CI(`ci.yml`)在匹配的 runner 上构建每个目标(cgo 不能交叉编译),�
 | 解释器探测 | `internal/lsp/interpreter.go`(`libraryProbe`、`syntaxProbe`) |
 | 测试发现 | `internal/analysis/luaunit.go`、`internal/analysis/busted.go` |
 | 扩展接线、命令、设置 | `vscode/src/extension.ts`、`vscode/package.json` |
+
+## 扩展语言与调试服务
+
+`analysis/refactoring.go` 根据词法绑定查找引用并重命名局部符号，双向检查名称捕获；LSP 返回带文档版本的编辑。`analysis/signature.go` 静态解析被调用函数和参数位置，并复用有界模块解析器提供跨模块函数声明。
+
+上面的传输图描述普通 launch。可选 `transport.lua` 使用 LuaSocket TCP 支持 attach 和交互式 launch。交互式 launch 创建带认证的本机回环连接，保留 stdin，通过有界输入队列传入程序数据。attach 连接主动接入的宿主，断开会关闭传输并恢复钩子、协程 API 和 JIT 状态，不杀死宿主。详见[调试指南](debugging.zh-CN.md)。
+
+`lua/resumeCoroutine` 不带参数地恢复挂起协程，在断点、yield 或结束时再次停止；可选的捕获错误检查保留失败协程栈直到继续。复杂 table 快照使用 `lua-table-v1` 表示对象身份和带类型的键，渲染只读文档前仍执行深度、数量和字节上限检查。

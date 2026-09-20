@@ -51,3 +51,7 @@ CI 打包 darwin-x64/arm64、linux-x64/arm64 和 win32-x64/arm64。Windows ARM64
 更新 `vscode/CHANGELOG.md`、`vscode/package.json` 和 `package-lock.json` 中的版本号，打 `v<version>` 标签并发布 GitHub Release。`release.yml` 复用 CI 构建，发布 VSIX 并挂到 Release。仓库需配置环境 `marketplace-publish` 及密钥 `AZURE_CLIENT_ID`、`AZURE_TENANT_ID`（Marketplace 工作负载身份联合）和 `OVSX_PAT`。
 
 发布失败后，可在 Actions → Release → Run workflow 中填写已有标签（如 `v0.1.0`）重试。重试使用该 Release 的六个平台 VSIX 附件，并跳过商店中已发布的版本。
+
+### 扩展回归测试
+
+VS Code E2E 需要 Lua 5.4 对应的 LuaSocket、LuaUnit 3.4 和 Busted 2.2.0。设置 `STYLUA_TEST_BINARY`、`LUAROCKS_TEST_BINARY` 和 `LUAROCKS_TEST_LUA`，可验证真实格式化及离线包安装、升级、依赖保护卸载流程。导出包目录的 `LUA_PATH`、`LUA_CPATH`，并设置 `LUA_TEST_SOCKET_REQUIRED=1`，可让缺少 LuaSocket 的 TCP 测试失败而非跳过。CI 的 E2E 平台已启用这些检查，所有平台还会执行 `npm run test:extension`。

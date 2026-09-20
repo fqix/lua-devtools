@@ -51,3 +51,7 @@ CI packages darwin-x64/arm64, linux-x64/arm64, and win32-x64/arm64. Windows ARM6
 Update `vscode/CHANGELOG.md` and the version in `vscode/package.json` and `package-lock.json`, tag `v<version>` and publish a GitHub Release. `release.yml` reuses the CI build, publishes the VSIX packages and attaches them to the release. Required repository configuration: environment `marketplace-publish` with secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` (Marketplace workload identity federation) and `OVSX_PAT`.
 
 To retry publishing, open Actions → Release → Run workflow and enter an existing tag (for example, `v0.1.0`). The retry uses the six platform VSIX assets from that release and skips versions already published to each store.
+
+### Extended regression tests
+
+VS Code E2E needs LuaSocket, LuaUnit 3.4 and Busted 2.2.0 for Lua 5.4. Export `STYLUA_TEST_BINARY`, `LUAROCKS_TEST_BINARY` and `LUAROCKS_TEST_LUA` to exercise real formatting and the offline package install/upgrade/dependency-protected uninstall lifecycle. Export the rock tree’s `LUA_PATH` and `LUA_CPATH`; set `LUA_TEST_SOCKET_REQUIRED=1` to fail instead of skipping TCP tests. CI enables these on its E2E runners. `npm run test:extension` also runs pure TypeScript tests on every platform.

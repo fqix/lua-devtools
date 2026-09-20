@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Cache canonical module search roots within each language request to avoid repeated filesystem lookups while keeping later requests fresh.
+
+- Add lexical references, capture-safe local renaming and call signature help, including statically resolved module functions.
+- View cyclic tables, mixed/sparse or object keys, binary strings and non-finite numbers using tagged JSON snapshots.
+- Add cooperative TCP attach for embedded hosts, interactive program input and EOF commands, suspended-coroutine resume, and opt-in inspection of caught coroutine errors.
+- Cover language features, package lifecycle, table views and debugger extensions with regression tests and real VS Code end-to-end tests.
+
+- List installed project-package versions and add version-specific installation, upgrade and uninstall actions, with dependency checks and one package task per environment.
+- Resolve module definitions and member completions from the selected interpreter’s Lua search paths and project packages; refresh the language environment when interpreters or workspace folders change.
+
 - Use the project logo for the Lua Environments sidebar and interpreter status bar.
 - Show standard-library functions and third-party Lua/native modules beneath each interpreter, including project dependencies and interpreter search paths.
 - Add Lua document and format-on-save support through StyLua, with project configuration, ignore rules and a configurable executable path.

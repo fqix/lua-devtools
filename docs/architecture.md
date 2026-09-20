@@ -145,7 +145,7 @@ flowchart TD
   probed --> items["CompletionItems<br/>':' keeps functions only"]
 ```
 
-`moduleResolver` searches `?.lua` and `?/init.lua` under the containing workspace root and the source file's ancestor directories, prefers unsaved open documents over disk, and caps file size and dependency depth. Definitions found this way also power go-to-definition across files.
+`moduleResolver` first uses the selected environment’s search templates (project packages and interpreter `package.path`), scoped by workspace, then searches `?.lua` and `?/init.lua` under the containing workspace root and the source file's ancestor directories, prefers unsaved open documents over disk, and caps file size and dependency depth. Definitions found this way also power go-to-definition across files.
 
 ### Code lenses
 
@@ -303,3 +303,11 @@ CI (`ci.yml`) builds every target on a matching runner (cgo cannot cross-compile
 | Interpreter probes | `internal/lsp/interpreter.go` (`libraryProbe`, `syntaxProbe`) |
 | Test discovery | `internal/analysis/luaunit.go`, `internal/analysis/busted.go` |
 | Extension wiring, commands, settings | `vscode/src/extension.ts`, `vscode/package.json` |
+
+## Extended language and debugger services
+
+`analysis/refactoring.go` follows lexical bindings for references and local rename, rejecting capture in both directions. LSP returns versioned document edits. `analysis/signature.go` resolves static callees and argument positions, including module definitions supplied by the existing bounded module resolver.
+
+The transport diagrams above describe ordinary launch. Optional `transport.lua` uses LuaSocket TCP for attach and interactive launch. Interactive launch creates an authenticated loopback connection, leaving stdin for program data through a bounded input queue. Attach connects to a cooperating host; disconnect closes the transport and restores hooks, coroutine APIs and JIT state without killing the host. See the [debugging guide](debugging.md).
+
+`lua/resumeCoroutine` runs a suspended coroutine without arguments, then stops again at a breakpoint, yield or completion. Opt-in caught-error inspection preserves the failed coroutine stack until continue. Snapshot fallback encodes object identities and typed keys in `lua-table-v1`; the same depth/value/byte limits apply before rendering the read-only document.

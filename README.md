@@ -13,7 +13,7 @@ Lua debugging and language support for VS Code, supporting **Lua 5.1–5.5 and L
 ## Features
 
 - Breakpoints, conditional breakpoints, stepping, call stacks, coroutine inspection and Debug Console evaluation.
-- Syntax diagnostics, completion, hover, outline and definition navigation, including Lua 5.5 declarations and statically resolved local modules.
+- Syntax diagnostics, completion, hover, outline, definitions, references, local renaming and signature help, including Lua 5.5 declarations and statically resolved local modules.
 - Interpreter discovery, switching and project-local package installation.
 - Read-only table JSON views and per-test Run/Debug actions for LuaUnit and Busted.
 - English and Simplified Chinese UI.
@@ -22,15 +22,15 @@ Lua debugging and language support for VS Code, supporting **Lua 5.1–5.5 and L
 
 In **Lua Environments**, click an interpreter to select it, expand it to see its path, use **+** to enter a path, or refresh to rescan. Selection applies to subsequent runs and debug sessions; a launch configuration’s `luaPath` takes precedence.
 
-The selected environment expands to show standard libraries and their functions, plus third-party modules from project packages and interpreter search paths. Lua sources open on click; native modules reveal their file location. Refresh after external installations. Scanning does not execute third-party modules or account for runtime changes to `package.path`.
+The selected environment expands to show standard libraries and their functions, plus third-party modules from project packages and interpreter search paths. Lua sources open on click; native modules reveal their file location. F12 and module-member completion use the selected interpreter’s Lua search paths and project packages. Refresh after external installations. Scanning does not execute third-party modules or account for runtime changes to `package.path`.
 
-Click the **package icon** beside an interpreter to install a package such as `luasocket`. Requires LuaRocks; set `luaDevtools.luarocksPath` if it is not on PATH. Installation logs appear in the task terminal.
+Click the **package icon** beside an interpreter, or the install button on **Project packages**, to install `luasocket` or a specific version such as `luaunit@3.5-1`. **Project packages** lists installed versions; use the upgrade button or right-click to install another version or uninstall that version. LuaRocks blocks removal when it would break dependencies. Requires LuaRocks; set `luaDevtools.luarocksPath` if it is not on PATH. Installation logs appear in the task terminal.
 
 Dependencies are isolated by project and interpreter under `.lua-devtools/rocks/` and loaded automatically by new Run/Debug sessions. Add `.lua-devtools/` to your `.gitignore`. Native packages may require a compiler and Lua development headers. External terminals are not configured automatically.
 
 ## Tables and tests
 
-While paused, right-click a table in Variables and choose **View Table as JSON**. Snapshots retain numeric precision and use type markers for functions, userdata and threads. Limits: 32 levels, 10,000 values and 512 KiB. Circular references, mixed/sparse keys, binary strings and non-finite numbers are unsupported.
+While paused, right-click a table in Variables and choose **View Table as JSON**. Snapshots retain numeric precision and use type markers for functions, userdata and threads. Cyclic references, mixed/sparse or object keys, binary strings and non-finite numbers use a tagged structure with `$format: "lua-table-v1"`. Limits: 32 levels, 10,000 values and 512 KiB.
 
 Install `luaunit` or `busted` for the selected interpreter to use **Run Test / Debug Test** above statically recognized cases. LuaUnit files must call their runner; Busted cases use the extension’s runner. See the [examples](examples/README.md).
 
@@ -57,12 +57,16 @@ To format on save:
 
 For a custom `launch.json`, use `type: "lua"`, `request: "launch"` and `program`. Optional fields: `args`, `cwd`, `env`, `luaPath`, `stopOnEntry`, `packagePath` and `packageCPath`.
 
+## More debugging modes
+
+TCP attach supports Lua and embedded hosts that load the debugger; disconnect leaves the host running. Set `interactive: true` on a launch configuration to send stdin or EOF from the Command Palette. Both modes require LuaSocket. While paused, you can resume a suspended coroutine independently; `breakOnCoroutineErrors: true` enables inspection of errors caught by `coroutine.resume`. See the [debugging guide](docs/debugging.md).
+
 ## Limitations
 
-- No attach, embedded Lua debugging or interactive program stdin.
-- Pause and live breakpoint updates require the bundled native helper. Blocking C calls must return to Lua first.
-- Independently resuming suspended coroutines is unsupported; errors caught by `coroutine.resume` do not stop inside the failed coroutine. LuaJIT compilation is disabled while debugging.
-- Language analysis is static; dynamic loaders, custom module search paths and installed package-source navigation are unsupported. Without a trusted, working interpreter, analysis falls back to Lua 5.4.
+- Pause and live breakpoint updates use the bundled native helper in ordinary launch sessions, or LuaSocket polling in TCP mode. Blocking C calls must return to Lua; F11 cannot enter C implementations such as `os.time` or `cjson.encode`.
+- LuaJIT compilation is disabled while debugging. Attach requires cooperative host setup; it cannot inject into an arbitrary process.
+- References are limited to the current file. Renaming supports lexical locals, parameters and functions, rejecting names that change bindings. Signature help uses static function declarations.
+- Language analysis is static: dynamic loaders, runtime changes to `package.path`, launch-only path overrides and native C implementations are not resolved. Without a trusted, working interpreter, analysis falls back to Lua 5.4.
 
 ## Documentation
 
