@@ -96,6 +96,8 @@ LUA_TEST_BINARY=/absolute/path/to/lua npm run test:dap
 
 在 VS Code 中打开本目录按 F5：先执行 `npm run build`，再打开扩展开发窗口（工作区为 `examples/`）。
 
+参见[示例指南](examples/README.md)，体验阻塞 sleep、协程定时调度、协程错误，以及运行中暂停和修改断点。
+
 CodeLens 端到端测试需要为 Lua 5.4 安装 `luaunit` 3.4 和 `busted` 2.2.0。使用自定义 LuaRocks 目录时，先导出对应的 `LUA_PATH` 和 `LUA_CPATH`，再运行 `npm run test:e2e`；CI 会将这些依赖安装到临时目录。
 
 ### 目录

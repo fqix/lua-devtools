@@ -96,6 +96,8 @@ Replace the executable path and expected version together. These variables selec
 
 Open this folder in VS Code and press F5: `npm run build` runs, then an Extension Development Host opens on `examples/`.
 
+See the [example guide](examples/README.md) for blocking sleep, cooperative coroutine scheduling, coroutine errors, and live pause/breakpoint exercises.
+
 The CodeLens end-to-end tests require `luaunit` 3.4 and `busted` 2.2.0 installed for Lua 5.4. If using a custom LuaRocks tree, export its `LUA_PATH` and `LUA_CPATH` before running `npm run test:e2e`; CI installs these dependencies in a temporary tree.
 
 ### Layout
