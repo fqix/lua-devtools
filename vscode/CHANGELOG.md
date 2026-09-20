@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 — 2026-09-20
+
+### Added
+
+- Lua Environments sidebar: discover interpreters, inspect paths, switch the active interpreter, refresh discovery, enter a custom path and restore automatic selection.
+- Install LuaRocks packages from the interpreter's package icon. Dependencies are isolated by project and interpreter under `.lua-devtools/rocks/` and loaded automatically by new run/debug sessions.
+- Configure the LuaRocks executable with `luaDevtools.luarocksPath`; installation progress and errors appear in the task terminal.
+
+### Changed
+
+- Simplify the English and Chinese READMEs and add separate architecture and development guides.
+
 ## 0.2.0 — 2026-09-20
 
 ### Added
