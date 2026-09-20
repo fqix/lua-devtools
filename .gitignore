@@ -1,0 +1,9 @@
+node_modules/
+out/
+dist/
+bin/
+*.vsix
+.DS_Store
+.vscode-test/
+vscode/LICENSE
+vscode/README.md

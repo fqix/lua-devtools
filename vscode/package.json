@@ -1,0 +1,196 @@
+{
+  "name": "lua-devtools",
+  "displayName": "%extension.displayName%",
+  "description": "%extension.description%",
+  "version": "0.1.0",
+  "publisher": "fqix",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fqix/lua-devtools.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.91.0",
+    "node": ">=22 <23"
+  },
+  "categories": [
+    "Debuggers",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:lua"
+  ],
+  "main": "./dist/extension.js",
+  "l10n": "./l10n",
+  "contributes": {
+    "commands": [
+      {
+        "command": "luaDevtools.run",
+        "title": "%command.run%",
+        "icon": "$(play)"
+      },
+      {
+        "command": "luaDevtools.debug",
+        "title": "%command.debug%",
+        "icon": "$(debug-alt)"
+      }
+    ],
+    "breakpoints": [
+      {
+        "language": "lua"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "lua",
+        "label": "%debugger.label%",
+        "languages": [
+          "lua"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "%launch.program%",
+                "default": "${file}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "%launch.args%",
+                "default": []
+              },
+              "cwd": {
+                "type": "string",
+                "description": "%launch.cwd%"
+              },
+              "luaPath": {
+                "type": "string",
+                "description": "%launch.luaPath%"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "%launch.stopOnEntry%",
+                "default": false
+              },
+              "packagePath": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "%launch.packagePath%",
+                "default": []
+              },
+              "packageCPath": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "%launch.packageCPath%",
+                "default": []
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "%launch.env%",
+                "default": {}
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "lua",
+            "request": "launch",
+            "name": "%launch.name.debug%",
+            "program": "${file}"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "%snippet.label%",
+            "description": "%snippet.description%",
+            "body": {
+              "type": "lua",
+              "request": "launch",
+              "name": "%launch.name.debug%",
+              "program": "^\"\\${file}\""
+            }
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "%extension.displayName%",
+      "properties": {
+        "luaDevtools.luaPath": {
+          "type": "string",
+          "default": "",
+          "description": "%config.luaPath%"
+        },
+        "luaDevtools.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "%config.trace.server%"
+        }
+      }
+    },
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "luaDevtools.run",
+          "when": "resourceLangId == lua",
+          "group": "navigation@1"
+        },
+        {
+          "command": "luaDevtools.debug",
+          "when": "resourceLangId == lua",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "luaDevtools.run",
+          "when": "resourceLangId == lua"
+        },
+        {
+          "command": "luaDevtools.debug",
+          "when": "resourceLangId == lua"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "check": "tsc --noEmit -p .",
+    "vscode:prepublish": "node esbuild.mjs"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.20.4",
+    "@types/vscode": "^1.91.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.28.2",
+    "mocha": "^12.0.2",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.1"
+  }
+}

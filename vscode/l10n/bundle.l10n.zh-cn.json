@@ -1,0 +1,8 @@
+{
+  "{0} not found. Run `npm run build:go` first.": "找不到 {0}，请先执行 `npm run build:go`。",
+  "Open a Lua file first, or set \"program\" in launch.json.": "请先打开一个 Lua 文件，或在 launch.json 中指定 \"program\"。",
+  "Open a Lua file first.": "请先打开一个 Lua 文件。",
+  "Run Lua file": "运行 Lua 文件",
+  "Debug Lua file": "调试 Lua 文件",
+  "Lua DevTools Language Server": "Lua DevTools 语言服务"
+}

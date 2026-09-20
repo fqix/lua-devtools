@@ -1,0 +1,20 @@
+{
+  "extension.displayName": "Lua DevTools",
+  "extension.description": "VS Code 的 Lua 调试器（DAP）与语言服务（LSP），由独立的 Go 服务端驱动。",
+  "command.run": "Lua DevTools: 运行 Lua 文件",
+  "command.debug": "Lua DevTools: 调试 Lua 文件",
+  "debugger.label": "Lua DevTools",
+  "launch.program": "要调试的 Lua 脚本的绝对路径。",
+  "launch.args": "传给脚本的命令行参数。",
+  "launch.cwd": "脚本的工作目录，默认为脚本所在目录。",
+  "launch.luaPath": "Lua 解释器路径。为空时依次查找 lua5.4、Homebrew lua@5.4、lua。",
+  "launch.stopOnEntry": "在脚本第一行暂停。",
+  "launch.name.debug": "调试 Lua 文件",
+  "snippet.label": "Lua DevTools: 启动",
+  "snippet.description": "用 Lua DevTools 启动当前文件",
+  "config.luaPath": "Lua 解释器路径。为空时依次查找 lua5.4、Homebrew lua@5.4、lua。",
+  "config.trace.server": "在 Output 面板中跟踪 VS Code 与 Lua 语言服务之间的 JSON-RPC 通信。",
+  "launch.packagePath": "追加到 LUA_PATH 的模块搜索模式（优先于解释器默认值），例如 \"${workspaceFolder}/src/?.lua\"。",
+  "launch.packageCPath": "追加到 LUA_CPATH 的 C 模块搜索模式（优先于解释器默认值），例如 \"${workspaceFolder}/lib/?.so\"。",
+  "launch.env": "Lua 进程的环境变量。"
+}

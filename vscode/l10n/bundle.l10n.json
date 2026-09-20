@@ -1,0 +1,8 @@
+{
+  "{0} not found. Run `npm run build:go` first.": "{0} not found. Run `npm run build:go` first.",
+  "Open a Lua file first, or set \"program\" in launch.json.": "Open a Lua file first, or set \"program\" in launch.json.",
+  "Open a Lua file first.": "Open a Lua file first.",
+  "Run Lua file": "Run Lua file",
+  "Debug Lua file": "Debug Lua file",
+  "Lua DevTools Language Server": "Lua DevTools Language Server"
+}

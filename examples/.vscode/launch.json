@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lua",
+      "request": "launch",
+      "name": "Debug hello.lua",
+      "program": "${workspaceFolder}/hello.lua",
+      "stopOnEntry": false
+    },
+    {
+      "type": "lua",
+      "request": "launch",
+      "name": "Debug current Lua file",
+      "program": "${file}"
+    }
+  ]
+}

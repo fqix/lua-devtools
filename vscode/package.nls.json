@@ -1,0 +1,20 @@
+{
+  "extension.displayName": "Lua DevTools",
+  "extension.description": "Lua debugger (DAP) and language server (LSP) for VS Code, powered by standalone Go servers.",
+  "command.run": "Lua DevTools: Run Lua File",
+  "command.debug": "Lua DevTools: Debug Lua File",
+  "debugger.label": "Lua DevTools",
+  "launch.program": "Absolute path of the Lua script to debug.",
+  "launch.args": "Command-line arguments passed to the script.",
+  "launch.cwd": "Working directory for the script; defaults to the script's directory.",
+  "launch.luaPath": "Lua interpreter path. When empty, lua5.4, Homebrew lua@5.4 and lua are tried in order.",
+  "launch.stopOnEntry": "Pause on the first line of the script.",
+  "launch.name.debug": "Debug Lua file",
+  "snippet.label": "Lua DevTools: Launch",
+  "snippet.description": "Launch the current file with Lua DevTools",
+  "config.luaPath": "Lua interpreter path. When empty, lua5.4, Homebrew lua@5.4 and lua are tried in order.",
+  "config.trace.server": "Traces the JSON-RPC communication between VS Code and the Lua language server (Output panel).",
+  "launch.packagePath": "Extra Lua module search patterns added to LUA_PATH before the interpreter defaults, e.g. \"${workspaceFolder}/src/?.lua\".",
+  "launch.packageCPath": "Extra C module search patterns added to LUA_CPATH before the interpreter defaults, e.g. \"${workspaceFolder}/lib/?.so\".",
+  "launch.env": "Environment variables for the Lua process."
+}

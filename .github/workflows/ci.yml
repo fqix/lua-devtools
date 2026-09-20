@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  # Lets release.yml reuse the build so published VSIX files come from the same pipeline.
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # tree-sitter is compiled through cgo, so every target is built on a runner
+        # of the same OS/arch. There is no GitHub-hosted Windows ARM runner, so
+        # win32-arm64 is not published.
+        include:
+          - runner: macos-15-intel
+            target: darwin-x64
+          - runner: macos-latest
+            target: darwin-arm64
+            e2e: true
+          - runner: ubuntu-latest
+            target: linux-x64
+            e2e: true
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+          - runner: windows-latest
+            target: win32-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # The DAP smoke test runs a real Lua 5.4 under lua/debugger.lua.
+      - name: Install Lua 5.4 (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends lua5.4
+
+      - name: Install Lua 5.4 (macOS)
+        if: runner.os == 'macOS'
+        run: brew install lua@5.4
+
+      # cgo on Windows needs a C compiler; the hosted image ships MinGW but keep it explicit.
+      - name: Ensure a C compiler (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { choco install mingw --no-progress -y }
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check types
+        run: npm run check
+
+      - name: Vet and test Go packages (race detector enabled)
+        run: npm run test:go
+
+      - name: Build Go servers
+        run: npm run build:go -- --target ${{ matrix.target }}
+
+      - name: Build extension
+        run: npm run build -w vscode
+
+      - name: Smoke test the language server
+        run: npm run test:lsp
+
+      # No Lua 5.4 package on the Windows runner; the Lua side is covered on the other platforms.
+      - name: Smoke test the debug adapter
+        if: runner.os != 'Windows'
+        run: npm run test:dap
+
+      # `e2e` runs the extension in a real VS Code; one runner per OS.
+      - name: Run end-to-end tests (VS Code)
+        if: matrix.e2e && runner.os == 'Linux'
+        run: xvfb-run -a npm run test:e2e
+
+      - name: Run end-to-end tests (VS Code)
+        if: matrix.e2e && runner.os != 'Linux'
+        run: npm run test:e2e
+
+      - name: Package VSIX
+        run: npm run package -- --target ${{ matrix.target }}
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v7
+        with:
+          name: lua-devtools-${{ matrix.target }}
+          path: vscode/lua-devtools-${{ matrix.target }}-*.vsix
+          if-no-files-found: error
+          retention-days: 14

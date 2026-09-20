@@ -1,0 +1,13 @@
+**
+!dist/extension.js
+!bin/lua-dap
+!bin/lua-dap.exe
+!bin/lua-lsp
+!bin/lua-lsp.exe
+!lua/**
+!README.md
+!CHANGELOG.md
+!LICENSE
+!package.json
+!package.nls*.json
+!l10n/**
