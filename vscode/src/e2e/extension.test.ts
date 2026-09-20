@@ -411,20 +411,23 @@ suite('Lua DevTools end to end', function () {
     });
 
     test('hovers a local', async () => {
-      const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
-        'vscode.executeHoverProvider',
-        doc.uri,
-        positionOf(doc, 'result\n'),
+      const hovers = await retry(
+        () => vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', doc.uri, positionOf(doc, 'result\n')),
+        values => values.length > 0,
+        'hover after interpreter change',
       );
       const text = hovers.map((h) => h.contents.map((c) => (c as vscode.MarkdownString).value).join('')).join('');
       assert.match(text, /local result/);
     });
 
     test('completes visible symbols', async () => {
-      const list = await vscode.commands.executeCommand<vscode.CompletionList>(
-        'vscode.executeCompletionItemProvider',
-        doc.uri,
-        positionOf(doc, 'return result').translate(0, 'return '.length),
+      const list = await retry(
+        () => vscode.commands.executeCommand<vscode.CompletionList>(
+          'vscode.executeCompletionItemProvider', doc.uri,
+          positionOf(doc, 'return result').translate(0, 'return '.length),
+        ),
+        value => value.items.some(item => (typeof item.label === 'string' ? item.label : item.label.label) === 'result'),
+        'completion after interpreter change',
       );
       const labels = list.items.map((i) => (typeof i.label === 'string' ? i.label : i.label.label));
       for (const expected of ['result', 'a', 'b', 'add', 'print']) {

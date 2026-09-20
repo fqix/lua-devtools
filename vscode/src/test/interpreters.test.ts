@@ -130,7 +130,7 @@ test('LuaRocks installs a chosen version, upgrades and safely removes project pa
       await run(rocks, [...common, 'make', '--pack-binary-rock', '--deps-mode', 'none', spec], { cwd: repository });
     }
     await run(path.join(path.dirname(rocks), process.platform === 'win32' ? 'luarocks-admin.bat' : 'luarocks-admin'),
-      ['--lua-version', environment.version, 'make_manifest', repository], { cwd: root });
+      ['--lua-version', environment.version, '--lua-dir', environment.luaDir, 'make_manifest', repository], { cwd: root });
     const server = ['--only-server', 'file://' + repository];
     await run(rocks, [...server, ...installArguments(environment, 'fixture_pkg', '1.0-1')], { cwd: root });
     assert.deepEqual(await installedPackages(rocks, environment, root), [{ name: 'fixture_pkg', version: '1.0-1' }]);
