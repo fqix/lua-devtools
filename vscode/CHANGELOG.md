@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add Lua document and format-on-save support through StyLua, with project configuration, ignore rules and a configurable executable path.
+
 ## 0.3.0
 
 ### Added

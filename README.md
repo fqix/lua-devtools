@@ -32,6 +32,19 @@ While paused, right-click a table in Variables and choose **View Table as JSON**
 
 Install `luaunit` or `busted` for the selected interpreter to use **Run Test / Debug Test** above statically recognized cases. LuaUnit files must call their runner; Busted cases use the extension’s runner. See the [examples](examples/README.md).
 
+## Formatting
+
+Install [StyLua](https://github.com/JohnnyMorganz/StyLua), or set `luaDevtools.styluaPath`, then choose **Format Document** in a trusted workspace. Project `stylua.toml` / `.stylua.toml` and `.styluaignore` files are respected. Syntax support depends on the installed StyLua version; errors leave the document unchanged.
+
+To format on save:
+
+```json
+"[lua]": {
+  "editor.defaultFormatter": "fqix.lua-devtools",
+  "editor.formatOnSave": true
+}
+```
+
 ## Configuration
 
 | Setting | Purpose |

@@ -26,5 +26,6 @@
   "Install {0} ({1})": "Install {0} ({1})",
   "Installed {0} for {1}. New run and debug sessions will load it.": "Installed {0} for {1}. New run and debug sessions will load it.",
   "Lua package installation failed. See the task terminal for details.": "Lua package installation failed. See the task terminal for details.",
-  "Cannot install Lua package: {0}": "Cannot install Lua package: {0}"
+  "Cannot install Lua package: {0}": "Cannot install Lua package: {0}",
+  "Lua formatting failed. Install StyLua or check luaDevtools.styluaPath and the StyLua output channel.": "Lua formatting failed. Install StyLua or check luaDevtools.styluaPath and the StyLua output channel."
 }

@@ -32,6 +32,19 @@ VS Code 的 Lua 调试与语言服务扩展，支持 **Lua 5.1–5.5 和 LuaJIT 
 
 为所选解释器安装 `luaunit` 或 `busted` 后，可在静态识别的用例上点击 **运行测试／调试测试**。LuaUnit 文件需调用自身 runner；Busted 用例使用扩展提供的 runner。参见[示例指南](examples/README.md)。
 
+## 格式化
+
+安装 [StyLua](https://github.com/JohnnyMorganz/StyLua)，或设置 `luaDevtools.styluaPath`，在受信任工作区中使用 **格式化文档**。遵循项目的 `stylua.toml` / `.stylua.toml` 和 `.styluaignore`；语法支持取决于所安装的 StyLua 版本，失败时保留原文。
+
+保存时自动格式化：
+
+```json
+"[lua]": {
+  "editor.defaultFormatter": "fqix.lua-devtools",
+  "editor.formatOnSave": true
+}
+```
+
 ## 配置
 
 | 设置 | 用途 |

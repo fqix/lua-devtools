@@ -179,6 +179,12 @@
           "default": "",
           "description": "%config.luarocksPath%",
           "scope": "window"
+        },
+        "luaDevtools.styluaPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "%config.styluaPath%"
         }
       }
     },

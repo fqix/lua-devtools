@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
+import { formatLua } from '../formatter';
 import { automaticInterpreter, inspectInterpreter } from '../interpreters';
 import { packageEnvironment } from '../projectPackages';
 import { InterpreterTreeProvider } from '../interpreterView';
@@ -156,6 +157,44 @@ suite('Lua DevTools end to end', function () {
     } finally {
       await vscode.workspace.fs.delete(module);
       await vscode.workspace.fs.delete(program);
+    }
+  });
+
+  test('formats unsaved Lua with StyLua config and respects ignores', async function () {
+    const binary = process.env.STYLUA_TEST_BINARY;
+    if (!binary) { this.skip(); return; }
+    const config = vscode.workspace.getConfiguration('luaDevtools');
+    const previous = config.inspect<string>('styluaPath')?.workspaceValue;
+    const directory = fileUri('formatting-test');
+    const uri = vscode.Uri.joinPath(directory, 'buffer with spaces.lua');
+    await vscode.workspace.fs.createDirectory(directory);
+    await vscode.workspace.fs.writeFile(uri, Buffer.from(''));
+    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(directory, 'stylua.toml'), Buffer.from('indent_type = "Spaces"\nindent_width = 2\n'));
+    try {
+      await config.update('styluaPath', binary, vscode.ConfigurationTarget.Workspace);
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const source = '-- 中文 comment\nlocal function f(x)\nreturn {text=[=[  unchanged  ]=],value=x+1}\nend\n';
+      const insert = new vscode.WorkspaceEdit(); insert.insert(uri, new vscode.Position(0, 0), source);
+      await vscode.workspace.applyEdit(insert);
+      assert.ok(doc.isDirty);
+      const edits = await vscode.commands.executeCommand<vscode.TextEdit[]>('vscode.executeFormatDocumentProvider', uri, { tabSize: 8, insertSpaces: false });
+      assert.ok(edits?.length);
+      assert.equal(Buffer.from(await vscode.workspace.fs.readFile(uri)).toString(), '', 'formatter must not write the file');
+      const apply = new vscode.WorkspaceEdit(); apply.set(uri, edits); await vscode.workspace.applyEdit(apply);
+      assert.match(doc.getText(), /\n  return/);
+      assert.ok(doc.getText().includes('[=[  unchanged  ]=]'));
+      assert.ok(doc.getText().includes('-- 中文 comment'));
+      const again = await vscode.commands.executeCommand<vscode.TextEdit[]>('vscode.executeFormatDocumentProvider', uri, { tabSize: 2, insertSpaces: true });
+      assert.equal(again?.length ?? 0, 0, 'formatting is idempotent');
+      const ignored = vscode.Uri.joinPath(directory, 'ignored.lua');
+      await vscode.workspace.fs.writeFile(ignored, Buffer.from('local x=1'));
+      await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(directory, '.styluaignore'), Buffer.from('ignored.lua\n'));
+      assert.equal(await formatLua(binary, 'local x=1', ignored.fsPath, directory.fsPath), 'local x=1');
+      await assert.rejects(formatLua(binary, 'local =', uri.fsPath, directory.fsPath));
+      await assert.rejects(formatLua(binary, source, uri.fsPath, directory.fsPath, AbortSignal.abort()));
+    } finally {
+      await config.update('styluaPath', previous, vscode.ConfigurationTarget.Workspace);
+      await vscode.workspace.fs.delete(directory, { recursive: true });
     }
   });
 
