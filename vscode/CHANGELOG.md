@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 — 2026-09-20
+## 0.3.0
 
 ### Added
 
@@ -12,7 +12,7 @@
 
 - Simplify the English and Chinese READMEs and add separate architecture and development guides.
 
-## 0.2.0 — 2026-09-20
+## 0.2.0
 
 ### Added
 
