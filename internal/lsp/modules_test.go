@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/fqix/lua-devtools/internal/analysis"
+	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
 func TestModuleExports(t *testing.T) {
@@ -70,6 +71,121 @@ func TestModuleExports(t *testing.T) {
 	}
 }
 
+func TestEnvironmentModuleDefinitions(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, template, module string
+		unsaved, forwarded     bool
+	}{
+		{name: "external source", template: "?.lua", module: "pkg/mod.lua"},
+		{name: "directory module", template: "?/init.lua", module: "pkg/mod/init.lua"},
+		{name: "prefixed template", template: "lib_?.lua", module: "lib_pkg/mod.lua"},
+		{name: "unsaved dependency", template: "?.lua", module: "pkg/mod.lua", unsaved: true},
+		{name: "forwarded dependency", template: "?.lua", module: "pkg/mod.lua", forwarded: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			root, library := t.TempDir(), t.TempDir()
+			modulePath := filepath.Join(library, tt.module)
+			if err := os.MkdirAll(filepath.Dir(modulePath), 0700); err != nil {
+				t.Fatal(err)
+			}
+			source := "local M={}\nfunction M.run() end\nreturn M"
+			disk := source
+			if tt.unsaved {
+				disk = "return {}"
+			}
+			if err := os.WriteFile(modulePath, []byte(disk), 0600); err != nil {
+				t.Fatal(err)
+			}
+			name := "pkg.mod"
+			if tt.forwarded {
+				if err := os.WriteFile(filepath.Join(library, "forward.lua"), []byte(`return require("pkg.mod")`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				name = "forward"
+			}
+			text := []byte(`local m=require("` + name + `"); m.run()`)
+			parsed := analysis.Parse(text)
+			defer parsed.Close()
+			uri := pathFileURI(filepath.Join(root, "main.lua"))
+			server := &Server{
+				workspaceRoots: []string{root},
+				modulePaths:    []moduleSearchPath{{Root: root, Templates: []string{filepath.Join(library, tt.template)}}},
+				docs:           map[string]*document{uri: {uri: uri, text: text, file: parsed}},
+			}
+			if tt.unsaved {
+				server.docs[pathFileURI(modulePath)] = &document{text: []byte(source)}
+			}
+			got, err := server.definition(nil, &protocol.DefinitionParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+					Position:     toPosition(parsed.PositionOf(strings.Index(string(text), "m.run") + 3)),
+				},
+			})
+			location, ok := got.(protocol.Location)
+			if err != nil || !ok || location.URI != pathFileURI(modulePath) || location.Range.Start.Line != 1 {
+				t.Fatalf("definition=%+v err=%v, want %s line 1", got, err, modulePath)
+			}
+			members := server.moduleResolver(uri)(name)
+			if len(members) != 1 || members[0].Name != "run" {
+				t.Fatalf("completion members=%+v", members)
+			}
+		})
+	}
+}
+
+func TestEnvironmentSearchOrderAndWorkspaceIsolation(t *testing.T) {
+	t.Parallel()
+	root, other, library := t.TempDir(), t.TempDir(), t.TempDir()
+	for file, text := range map[string]string{
+		filepath.Join(root, "same.lua"):    "return {project=1}",
+		filepath.Join(other, "same.lua"):   "return {other=1}",
+		filepath.Join(library, "same.lua"): "return {installed=1}",
+	} {
+		if err := os.WriteFile(file, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := &Server{
+		docs: map[string]*document{}, workspaceRoots: []string{root, other},
+		modulePaths: []moduleSearchPath{
+			{Root: root, Templates: []string{filepath.Join(library, "?.lua"), "./?.lua"}},
+			{Root: other, Templates: []string{"./?.lua"}},
+		},
+	}
+	for _, tt := range []struct{ name, file, want string }{
+		{name: "installed precedes local", file: filepath.Join(root, "main.lua"), want: "installed"},
+		{name: "other workspace", file: filepath.Join(other, "main.lua"), want: "other"},
+		{name: "opened dependency", file: filepath.Join(library, "forward.lua"), want: "installed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := server.moduleResolver(pathFileURI(tt.file))("same")
+			if len(got) != 1 || got[0].Name != tt.want {
+				t.Fatalf("got %+v want %s", got, tt.want)
+			}
+		})
+	}
+	// Rebuilding a resolver after an environment change must not reuse old exports.
+	server.modulePaths[0].Templates = []string{"./?.lua"}
+	got := server.moduleResolver(pathFileURI(filepath.Join(root, "main.lua")))("same")
+	if len(got) != 1 || got[0].Name != "project" {
+		t.Fatalf("stale environment: %+v", got)
+	}
+}
+
+func TestUntrustedInitializationIgnoresModulePaths(t *testing.T) {
+	t.Parallel()
+	server := &Server{docs: map[string]*document{}}
+	_, err := server.initialize(nil, &protocol.InitializeParams{InitializationOptions: map[string]any{
+		"useInterpreter": false,
+		"modulePaths":    []moduleSearchPath{{Root: "/project", Templates: []string{"/external/?.lua"}}},
+	}})
+	if err != nil || len(server.modulePaths) != 0 {
+		t.Fatalf("untrusted paths accepted: %+v, %v", server.modulePaths, err)
+	}
+}
+
 func TestModuleResolverDoesNotFollowOutsideSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.lua")
@@ -87,5 +203,9 @@ func TestModuleResolverDoesNotFollowOutsideSymlink(t *testing.T) {
 	uri := (&url.URL{Scheme: "file", Path: path}).String()
 	if got := server.moduleResolver(uri)("escape"); len(got) != 0 {
 		t.Fatalf("outside export: %+v", got)
+	}
+	server.modulePaths = []moduleSearchPath{{Root: root, Templates: []string{filepath.Join(root, "?.lua")}}}
+	if got := server.moduleResolver(uri)("escape"); len(got) != 0 {
+		t.Fatalf("configured path followed an outside symlink: %+v", got)
 	}
 }

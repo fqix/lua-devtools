@@ -28,7 +28,54 @@ func withinDirectory(root, path string) bool {
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }
 
-// moduleResolver uses ?.lua and ?/init.lua under the workspace and source ancestors.
+type moduleSearchPath struct {
+	Root      string   `json:"root"`
+	Templates []string `json:"templates"`
+}
+
+type moduleCandidate struct {
+	path string
+	root string
+}
+
+func templateRoot(template string) string {
+	prefix, _, _ := strings.Cut(template, "?")
+	return filepath.Dir(prefix + "placeholder")
+}
+
+// Prefer the owning workspace. For an opened dependency, retain the environment
+// whose configured search directory contains it, so nested requires also work.
+func (s *Server) moduleEnvironment(path string) *moduleSearchPath {
+	var selected *moduleSearchPath
+	for i := range s.modulePaths {
+		entry := &s.modulePaths[i]
+		if entry.Root != "" && withinDirectory(entry.Root, path) {
+			if selected == nil || len(entry.Root) > len(selected.Root) {
+				selected = entry
+			}
+		}
+	}
+	if selected != nil {
+		return selected
+	}
+	for i := range s.modulePaths {
+		entry := &s.modulePaths[i]
+		if entry.Root == "" {
+			return entry
+		}
+		for _, template := range entry.Templates {
+			if !filepath.IsAbs(template) {
+				template = filepath.Join(entry.Root, template)
+			}
+			if strings.Contains(template, "?") && withinDirectory(templateRoot(template), path) {
+				return entry
+			}
+		}
+	}
+	return nil
+}
+
+// moduleResolver searches selected-environment templates, then local source roots.
 // It never executes require, package loaders, or project code. The caller holds
 // s.mu, allowing unsaved open documents to override disk content consistently.
 func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []analysis.Member {
@@ -37,16 +84,14 @@ func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []
 		return nil
 	}
 	root := filepath.Dir(path)
+	foundWorkspace := false
 	for _, folder := range s.workspaceRoots {
-		if withinDirectory(folder, path) {
+		if withinDirectory(folder, path) && (!foundWorkspace || len(folder) > len(root)) {
 			root = folder
-			break
+			foundWorkspace = true
 		}
 	}
-	canonicalRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return nil
-	}
+	environment := s.moduleEnvironment(path)
 	roots := []string{root}
 	for dir := filepath.Dir(path); dir != root && withinDirectory(root, dir); dir = filepath.Dir(dir) {
 		roots = append(roots, dir)
@@ -71,21 +116,44 @@ func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []
 		cache[name] = nil // Mark before recursion, so cycles terminate.
 		depth++
 		defer func() { depth-- }()
-		candidates := []string{}
+		candidates := []moduleCandidate{}
+		if environment != nil {
+			base := environment.Root
+			if base == "" {
+				base = root
+			}
+			for _, template := range environment.Templates {
+				if strings.Count(template, "?") != 1 || strings.ContainsRune(template, '\x00') {
+					continue
+				}
+				if !filepath.IsAbs(template) {
+					template = filepath.Join(base, template)
+				}
+				candidate := strings.ReplaceAll(template, "?", filepath.Join(parts...))
+				candidates = append(candidates, moduleCandidate{path: candidate, root: templateRoot(template)})
+			}
+		}
 		for _, base := range roots {
 			stem := filepath.Join(append([]string{base}, parts...)...)
-			candidates = append(candidates, stem+".lua", filepath.Join(stem, "init.lua"))
+			candidates = append(candidates,
+				moduleCandidate{path: stem + ".lua", root: root},
+				moduleCandidate{path: filepath.Join(stem, "init.lua"), root: root},
+			)
 		}
 		for _, candidate := range candidates {
 			var text []byte
 			for uri, doc := range s.docs {
-				if fileURIPath(uri) == candidate {
+				if fileURIPath(uri) == candidate.path {
 					text = doc.text
 					break
 				}
 			}
 			if text == nil {
-				canonical, err := filepath.EvalSymlinks(candidate)
+				canonicalRoot, err := filepath.EvalSymlinks(candidate.root)
+				if err != nil {
+					continue
+				}
+				canonical, err := filepath.EvalSymlinks(candidate.path)
 				if err != nil || !withinDirectory(canonicalRoot, canonical) {
 					continue
 				}
@@ -116,7 +184,7 @@ func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []
 				for i := range members {
 					if def := members[i].Definition; def != nil && def.URI == "" {
 						copy := *def
-						copy.URI = pathFileURI(candidate)
+						copy.URI = pathFileURI(candidate.path)
 						members[i].Definition = &copy
 					}
 				}

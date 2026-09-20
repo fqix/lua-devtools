@@ -5,6 +5,7 @@ import { registerPackageManagement, configureProjectPackages } from './packageMa
 import { registerFormatting } from './formatting';
 import { registerTableView } from './tableView';
 import { registerInterpreterSelection } from './interpreterSelection';
+import { languageEnvironment, type LanguageEnvironment } from './languageEnvironment';
 import { LanguageClient, TransportKind } from 'vscode-languageclient/node';
 
 /**
@@ -81,27 +82,44 @@ function startLanguageClient(context: vscode.ExtensionContext): void {
     void vscode.window.showErrorMessage(vscode.l10n.t('{0} not found. Run `npm run build:go` first.', 'bin/lua-lsp'));
     return;
   }
-  client = new LanguageClient(
+  let options: LanguageEnvironment;
+  const languageClient = new LanguageClient(
     'luaDevtools',
     vscode.l10n.t('Lua DevTools Language Server'),
     { command: lsp, transport: TransportKind.stdio },
     {
       documentSelector: [{ scheme: 'file', language: 'lua' }],
-      initializationOptions: () => ({
-        luaPath: vscode.workspace.getConfiguration('luaDevtools').get<string>('luaPath'),
-        useInterpreter: vscode.workspace.isTrusted,
-        workspaceRoots: vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? [],
-      }),
+      initializationOptions: () => options,
     },
   );
-  // `luaDevtools.trace.server` in settings controls the JSON-RPC trace in the Output panel.
-  void client.start();
+  client = languageClient;
+  let pending = Promise.resolve();
+  let disposed = false;
+  let revision = 0;
+  const refresh = () => {
+    const current = ++revision;
+    pending = pending.then(async () => {
+      if (disposed || current !== revision) return;
+      const next = await languageEnvironment(
+        vscode.workspace.getConfiguration('luaDevtools').get<string>('luaPath') ?? '',
+        vscode.workspace.isTrusted,
+        vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? [],
+      );
+      if (disposed || current !== revision) return;
+      options = next;
+      if (languageClient.isRunning()) await languageClient.restart();
+      else await languageClient.start();
+    }).catch(error => languageClient.error('Cannot refresh Lua language environment', error));
+  };
+  // `luaDevtools.trace.server` controls the JSON-RPC trace in the Output panel.
+  refresh();
   context.subscriptions.push(
-    { dispose: () => void client?.stop() },
+    { dispose: () => { disposed = true; void languageClient.stop(); } },
     vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('luaDevtools.luaPath')) void client?.restart();
+      if (event.affectsConfiguration('luaDevtools.luaPath')) refresh();
     }),
-    vscode.workspace.onDidGrantWorkspaceTrust(() => void client?.restart()),
+    vscode.workspace.onDidChangeWorkspaceFolders(refresh),
+    vscode.workspace.onDidGrantWorkspaceTrust(refresh),
   );
 }
 

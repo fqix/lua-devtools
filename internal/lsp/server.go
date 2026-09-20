@@ -42,6 +42,7 @@ type Server struct {
 	locale         string // normalized client locale from initialize
 	runtime        *interpreter
 	workspaceRoots []string
+	modulePaths    []moduleSearchPath
 }
 
 func (s *Server) t(key string, args ...any) string {
@@ -74,9 +75,10 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 		s.locale = i18n.Normalize(*params.Locale)
 	}
 	var options struct {
-		LuaPath        string   `json:"luaPath"`
-		UseInterpreter bool     `json:"useInterpreter"`
-		WorkspaceRoots []string `json:"workspaceRoots"`
+		LuaPath        string             `json:"luaPath"`
+		UseInterpreter bool               `json:"useInterpreter"`
+		WorkspaceRoots []string           `json:"workspaceRoots"`
+		ModulePaths    []moduleSearchPath `json:"modulePaths"`
 	}
 	if raw, err := json.Marshal(params.InitializationOptions); err == nil {
 		_ = json.Unmarshal(raw, &options)
@@ -84,6 +86,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	s.workspaceRoots = options.WorkspaceRoots
 	if options.UseInterpreter {
 		s.runtime = inspectInterpreter(options.LuaPath)
+		s.modulePaths = options.ModulePaths
 	}
 	caps := protocol.ServerCapabilities{
 		TextDocumentSync:       protocol.TextDocumentSyncKindIncremental,
