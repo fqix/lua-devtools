@@ -19,6 +19,8 @@ type Member struct {
 type Definition struct {
 	URI        string
 	Start, End Position
+	Parameters []string
+	Method     bool
 }
 
 type memberValue struct {
@@ -188,6 +190,13 @@ func (f *File) inferMemberValue(n *tree_sitter.Node, values map[*Symbol]*memberV
 			target = method
 		}
 		value.definition = &Definition{Start: f.PositionOf(int(target.StartByte())), End: f.PositionOf(int(target.EndByte()))}
+		parameters := (&walker{file: f}).parameterNames(n)
+		value.definition.Parameters = []string{}
+		if parameters != "" {
+			value.definition.Parameters = strings.Split(parameters, ", ")
+		}
+		name := n.ChildByFieldName("name")
+		value.definition.Method = name != nil && name.Kind() == "method_index_expression"
 		// A single direct return is deterministic; conditional and multiple returns
 		// require control-flow analysis and intentionally remain unknown.
 		body := n.ChildByFieldName("body")

@@ -62,6 +62,10 @@ func Run(debug bool) error {
 		TextDocumentDidClose:       s.didClose,
 		TextDocumentDocumentSymbol: s.documentSymbol,
 		TextDocumentDefinition:     s.definition,
+		TextDocumentReferences:     s.references,
+		TextDocumentPrepareRename:  s.prepareRename,
+		TextDocumentRename:         s.rename,
+		TextDocumentSignatureHelp:  s.signatureHelp,
 		TextDocumentCompletion:     s.completion,
 		TextDocumentHover:          s.hover,
 		TextDocumentCodeLens:       s.codeLens,
@@ -88,10 +92,14 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 		s.runtime = inspectInterpreter(options.LuaPath)
 		s.modulePaths = options.ModulePaths
 	}
+	prepareRename := true
 	caps := protocol.ServerCapabilities{
 		TextDocumentSync:       protocol.TextDocumentSyncKindIncremental,
 		DocumentSymbolProvider: true,
 		DefinitionProvider:     true,
+		ReferencesProvider:     true,
+		RenameProvider:         &protocol.RenameOptions{PrepareProvider: &prepareRename},
+		SignatureHelpProvider:  &protocol.SignatureHelpOptions{TriggerCharacters: []string{"(", ","}},
 		HoverProvider:          true,
 		CompletionProvider:     &protocol.CompletionOptions{TriggerCharacters: []string{".", ":"}},
 		CodeLensProvider:       &protocol.CodeLensOptions{},
