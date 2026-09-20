@@ -11,3 +11,4 @@
 !package.json
 !package.nls*.json
 !l10n/**
+!media/icon.png

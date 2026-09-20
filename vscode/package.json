@@ -17,6 +17,11 @@
     "Debuggers",
     "Programming Languages"
   ],
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#0f172a",
+    "theme": "dark"
+  },
   "activationEvents": [
     "onLanguage:lua"
   ],
