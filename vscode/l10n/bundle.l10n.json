@@ -27,5 +27,18 @@
   "Installed {0} for {1}. New run and debug sessions will load it.": "Installed {0} for {1}. New run and debug sessions will load it.",
   "Lua package installation failed. See the task terminal for details.": "Lua package installation failed. See the task terminal for details.",
   "Cannot install Lua package: {0}": "Cannot install Lua package: {0}",
-  "Lua formatting failed. Install StyLua or check luaDevtools.styluaPath and the StyLua output channel.": "Lua formatting failed. Install StyLua or check luaDevtools.styluaPath and the StyLua output channel."
+  "Lua formatting failed. Install StyLua or check luaDevtools.styluaPath and the StyLua output channel.": "Lua formatting failed. Install StyLua or check luaDevtools.styluaPath and the StyLua output channel.",
+  "Cannot read libraries: {0}": "Cannot read libraries: {0}",
+  "Native C module": "Native C module",
+  "Lua source": "Lua source",
+  "Reveal module": "Reveal module",
+  "Open module": "Open module",
+  "No modules found.": "No modules found.",
+  "Some paths were skipped or the scan limit was reached.": "Some paths were skipped or the scan limit was reached.",
+  "Standard libraries": "Standard libraries",
+  "Native C function": "Native C function",
+  "Lua function": "Lua function",
+  "Third-party modules": "Third-party modules",
+  "Interpreter search paths": "Interpreter search paths",
+  "Project packages": "Project packages"
 }

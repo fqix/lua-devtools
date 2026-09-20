@@ -29,5 +29,18 @@
   "Installed {0} for {1}. New run and debug sessions will load it.": "已为 {1} 安装 {0}，新的运行和调试会话会自动加载。",
   "Lua package installation failed. See the task terminal for details.": "Lua 包安装失败，请查看任务终端中的详细信息。",
   "Cannot install Lua package: {0}": "无法安装 Lua 包：{0}",
-  "Lua formatting failed. Install StyLua or check luaDevtools.styluaPath and the StyLua output channel.": "Lua 格式化失败。请安装 StyLua，或检查 luaDevtools.styluaPath 和 StyLua 输出通道。"
+  "Lua formatting failed. Install StyLua or check luaDevtools.styluaPath and the StyLua output channel.": "Lua 格式化失败。请安装 StyLua，或检查 luaDevtools.styluaPath 和 StyLua 输出通道。",
+  "Cannot read libraries: {0}": "无法读取库：{0}",
+  "Native C module": "原生 C 模块",
+  "Lua source": "Lua 源码",
+  "Reveal module": "显示模块位置",
+  "Open module": "打开模块",
+  "No modules found.": "未发现模块。",
+  "Some paths were skipped or the scan limit was reached.": "部分路径被跳过或已达到扫描上限。",
+  "Standard libraries": "标准库",
+  "Native C function": "原生 C 函数",
+  "Lua function": "Lua 函数",
+  "Third-party modules": "第三方模块",
+  "Interpreter search paths": "解释器搜索路径",
+  "Project packages": "项目安装包"
 }

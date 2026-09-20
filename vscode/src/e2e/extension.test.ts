@@ -110,6 +110,11 @@ suite('Lua DevTools end to end', function () {
       assert.ok(interpreter?.command, 'a discovered interpreter is available');
       const details = await provider.getChildren(interpreter);
       assert.equal(details[0].label, interpreter.executable);
+      const standard = await provider.getChildren(details[1]);
+      const osLibrary = standard.find(row => row.label === 'os');
+      assert.ok(osLibrary);
+      const members = await provider.getChildren(osLibrary);
+      assert.ok(members.some(row => row.label === 'time' && row.description === 'Native C function'));
       await vscode.commands.executeCommand(interpreter.command.command, ...interpreter.command.arguments!);
       assert.equal(vscode.workspace.getConfiguration('luaDevtools').get('luaPath'), interpreter.executable);
       provider.refresh();
@@ -146,6 +151,16 @@ suite('Lua DevTools end to end', function () {
     await vscode.workspace.fs.writeFile(module, Buffer.from('return {value=42}'));
     await vscode.workspace.fs.writeFile(program, Buffer.from('assert(require("lua_devtools_package_test").value==42); print("PACKAGE_OK")'));
     try {
+      const provider = new InterpreterTreeProvider();
+      try {
+        const row = (await provider.getChildren()).find(item => item.executable === executable);
+        assert.ok(row);
+        const details = await provider.getChildren(row);
+        const projects = await provider.getChildren(details[2]);
+        const sources = await provider.getChildren(projects[0]);
+        const modules = await provider.getChildren(sources[0]);
+        assert.ok(modules.some(item => item.label === 'lua_devtools_package_test'));
+      } finally { provider.dispose(); }
       for (const noDebug of [false, true]) {
         const { recorder } = await startSession(() => vscode.debug.startDebugging(folder(), {
           type: 'lua', request: 'launch', name: 'Project package test', program: program.fsPath, luaPath: executable,

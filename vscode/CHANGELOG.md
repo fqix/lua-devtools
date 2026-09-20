@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show standard-library functions and third-party Lua/native modules beneath each interpreter, including project dependencies and interpreter search paths.
 - Add Lua document and format-on-save support through StyLua, with project configuration, ignore rules and a configurable executable path.
 
 ## 0.3.0

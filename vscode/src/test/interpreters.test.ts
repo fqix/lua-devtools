@@ -81,3 +81,23 @@ test('project packages isolate interpreter identities and preserve explicit sear
     assert.equal(validPackageName('owner/package-name'), true);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+import { scanModules } from '../libraries';
+
+test('library scan finds Lua and native modules without executing module code', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'lua libraries '));
+  try {
+    await mkdir(path.join(root, 'pkg'));
+    await writeFile(path.join(root, 'pkg', 'init.lua'), 'error("must not execute")');
+    await writeFile(path.join(root, 'example.lua'), 'error("must not execute")');
+    await writeFile(path.join(root, 'example.so'), 'native placeholder');
+    await writeFile(path.join(root, 'cjson.so'), 'native placeholder');
+    const result = await scanModules('./?.lua;./?/init.lua', './?.so', root);
+    assert.equal(result.limited, false);
+    assert.equal(result.unreadable, false);
+    assert.ok(result.modules.some(item => item.name === 'pkg' && item.file.endsWith('init.lua')));
+    assert.equal(result.modules.find(item => item.name === 'example')?.native, false);
+    assert.equal(result.modules.find(item => item.name === 'cjson')?.native, true);
+    assert.equal(result.modules.filter(item => item.name === 'example').length, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

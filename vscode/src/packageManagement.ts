@@ -36,6 +36,7 @@ export function registerPackageManagement(context: vscode.ExtensionContext): voi
       const listener = vscode.tasks.onDidEndTaskProcess(event => {
         if (event.execution !== execution) return;
         listener.dispose();
+        void vscode.commands.executeCommand('luaDevtools.refreshInterpreters');
         if (event.exitCode === 0) void vscode.window.showInformationMessage(vscode.l10n.t('Installed {0} for {1}. New run and debug sessions will load it.', name.trim(), interpreter.version));
         else void vscode.window.showErrorMessage(vscode.l10n.t('Lua package installation failed. See the task terminal for details.'));
       });
