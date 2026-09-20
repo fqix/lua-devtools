@@ -4,5 +4,7 @@
   "Open a Lua file first.": "请先打开一个 Lua 文件。",
   "Run Lua file": "运行 Lua 文件",
   "Debug Lua file": "调试 Lua 文件",
-  "Lua DevTools Language Server": "Lua DevTools 语言服务"
+  "Lua DevTools Language Server": "Lua DevTools 语言服务",
+  "Run Lua test": "运行 Lua 测试",
+  "Debug Lua test": "调试 Lua 测试"
 }

@@ -37,6 +37,8 @@ func T(locale, key string, args ...any) string {
 var catalogs = map[string]map[string]string{
 	"en": {
 		// lsp
+		"codelens.runTest":      "$(beaker) Run Test",
+		"codelens.debugTest":    "$(debug-alt) Debug Test",
 		"codelens.run":          "$(play) Run",
 		"codelens.debug":        "$(debug-alt) Debug",
 		"hover.definedOnLine":   "defined on line %d",
@@ -45,6 +47,7 @@ var catalogs = map[string]map[string]string{
 		"diagnostic.missing":    "Syntax error: missing %q",
 		"diagnostic.unexpected": "Syntax error: unexpected %s",
 		"diagnostic.endOfInput": "end of input",
+		"diagnostic.unclosed":   "Syntax error: expected %q to close %q from line %d",
 		// dap
 		"dap.invalidLaunchArgs":  "invalid launch arguments: %s",
 		"dap.missingProgram":     `launch configuration is missing "program"`,
@@ -58,6 +61,8 @@ var catalogs = map[string]map[string]string{
 		"dap.breakpointsQueued":  "Applied at the next pause",
 	},
 	"zh-cn": {
+		"codelens.runTest":       "$(beaker) 运行测试",
+		"codelens.debugTest":     "$(debug-alt) 调试测试",
 		"codelens.run":           "$(play) 运行",
 		"codelens.debug":         "$(debug-alt) 调试",
 		"hover.definedOnLine":    "定义于第 %d 行",
@@ -66,6 +71,7 @@ var catalogs = map[string]map[string]string{
 		"diagnostic.missing":     "语法错误：缺少 %q",
 		"diagnostic.unexpected":  "语法错误：意外的 %s",
 		"diagnostic.endOfInput":  "输入结束",
+		"diagnostic.unclosed":    "语法错误：缺少 %q，以闭合 %q（起始于第 %d 行）",
 		"dap.invalidLaunchArgs":  "launch 参数无效：%s",
 		"dap.missingProgram":     `launch 配置缺少 "program"`,
 		"dap.scriptNotFound":     "找不到脚本：%s",

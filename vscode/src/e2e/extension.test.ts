@@ -206,6 +206,52 @@ suite('Lua DevTools end to end', function () {
       assert.match(recorder.outputs(), /total:\t30/);
     });
 
+    for (const framework of [
+      { name: 'luaunit', file: 'test_luaunit.lua', test: 'TestExample.testSelected', variable: 'self.value' },
+      { name: 'busted', file: 'example_spec.lua', test: 'Example (a+b)? nested selected [1]', variable: 'value' },
+    ]) {
+      for (const debug of [false, true]) {
+        test(`${debug ? 'debugs' : 'runs'} one ${framework.name} test from its CodeLens`, async () => {
+          vscode.debug.removeBreakpoints(vscode.debug.breakpoints);
+          const uri = fileUri(framework.file);
+          const doc = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(doc);
+          const command = debug ? 'luaDevtools.debugTest' : 'luaDevtools.runTest';
+          const lenses = await retry(
+            () => vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri),
+            result => result.some(lens => lens.command?.command === command && lens.command.arguments?.[1] === framework.test),
+            'test CodeLens',
+          );
+          const lens = lenses.find(lens => lens.command?.command === command && lens.command.arguments?.[1] === framework.test)!;
+          assert.equal(lens.command!.arguments![2], framework.name);
+          const position = positionOf(doc, 'local actual');
+          const breakpoint = new vscode.SourceBreakpoint(new vscode.Location(uri, position));
+          vscode.debug.addBreakpoints([breakpoint]);
+          try {
+            const { session, recorder } = await startSession(() => vscode.commands.executeCommand(command, ...lens.command!.arguments!));
+            if (debug) {
+              const stopped = await until(() => recorder.event('stopped'), 30000, 'test breakpoint');
+              assert.equal(stopped.body.reason, 'breakpoint');
+              const { stackFrames } = await session.customRequest('stackTrace', { threadId: stopped.body.threadId });
+              assert.equal(stackFrames[0].line, position.line + 1);
+              const result = await session.customRequest('evaluate', { expression: framework.variable, frameId: stackFrames[0].id });
+              assert.equal(result.result, '41');
+              await session.customRequest('continue', { threadId: stopped.body.threadId });
+            }
+            await until(() => recorder.event('terminated'), 30000, 'test completion');
+            assert.equal(recorder.event('exited')?.body.exitCode, 0, recorder.outputs());
+            if (!debug) assert.equal(recorder.event('stopped'), undefined);
+            assert.match(recorder.outputs(), /SETUP/);
+            assert.match(recorder.outputs(), /SELECTED/);
+            assert.match(recorder.outputs(), /TEARDOWN/);
+            assert.doesNotMatch(recorder.outputs(), /OTHER/);
+          } finally {
+            vscode.debug.removeBreakpoints([breakpoint]);
+          }
+        });
+      }
+    }
+
     test('pauses on a runtime error', async () => {
       const uri = fileUri('error.lua');
       const { session, recorder } = await startSession(() =>

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Build the end-to-end tests and their scratch workspace, then run them in VS Code:
 //   node scripts/e2e.mjs [--build-only]
-// Requires `npm run build` (vscode/dist and bin/) and Lua 5.4.
+// Requires `npm run build` (vscode/dist and bin/) and Lua 5.4 with luaunit 3.4 and Busted 2.2.0.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,9 +31,11 @@ await build({
 // Scratch workspace with copies of the example scripts.
 const workspace = join(OUT, 'e2e-workspace');
 mkdirSync(workspace, { recursive: true });
-for (const name of ['hello.lua', 'error.lua', 'step.lua']) {
+for (const name of ['hello.lua', 'error.lua', 'step.lua', 'test_luaunit.lua', 'example_spec.lua']) {
   copyFileSync(join(ROOT, 'examples', name), join(workspace, name));
 }
+// The CodeLens must keep the selected interpreter even if .busted requests another.
+writeFileSync(join(workspace, '.busted'), 'return { default = { lua = "lua-devtools-must-not-spawn" } }\n');
 // A separate copy for the test that edits the buffer, so debugger runs see a valid hello.lua.
 copyFileSync(join(ROOT, 'examples', 'hello.lua'), join(workspace, 'edit.lua'));
 

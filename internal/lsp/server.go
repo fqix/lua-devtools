@@ -4,6 +4,7 @@
 package lsp
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -36,9 +37,11 @@ type document struct {
 }
 
 type Server struct {
-	mu     sync.Mutex
-	docs   map[string]*document
-	locale string // normalized client locale from initialize
+	mu             sync.Mutex
+	docs           map[string]*document
+	locale         string // normalized client locale from initialize
+	runtime        *interpreter
+	workspaceRoots []string
 }
 
 func (s *Server) t(key string, args ...any) string {
@@ -70,12 +73,24 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	if params.Locale != nil {
 		s.locale = i18n.Normalize(*params.Locale)
 	}
+	var options struct {
+		LuaPath        string   `json:"luaPath"`
+		UseInterpreter bool     `json:"useInterpreter"`
+		WorkspaceRoots []string `json:"workspaceRoots"`
+	}
+	if raw, err := json.Marshal(params.InitializationOptions); err == nil {
+		_ = json.Unmarshal(raw, &options)
+	}
+	s.workspaceRoots = options.WorkspaceRoots
+	if options.UseInterpreter {
+		s.runtime = inspectInterpreter(options.LuaPath)
+	}
 	caps := protocol.ServerCapabilities{
 		TextDocumentSync:       protocol.TextDocumentSyncKindIncremental,
 		DocumentSymbolProvider: true,
 		DefinitionProvider:     true,
 		HoverProvider:          true,
-		CompletionProvider:     &protocol.CompletionOptions{TriggerCharacters: []string{"."}},
+		CompletionProvider:     &protocol.CompletionOptions{TriggerCharacters: []string{".", ":"}},
 		CodeLensProvider:       &protocol.CodeLensOptions{},
 	}
 	version := Version
@@ -162,14 +177,23 @@ func (s *Server) reparse(ctx *glsp.Context, doc *document) {
 		doc.timer.Stop()
 	}
 	version := doc.version
+	text := append([]byte(nil), doc.text...)
+	fallback := s.diagnostics(doc)
+	runtime := s.runtime
 	doc.timer = time.AfterFunc(diagnosticsDelay, func() {
+		result := fallback
+		if runtime != nil {
+			if diagnostics, ok := runtime.syntaxDiagnostics(text); ok {
+				result.Diagnostics = diagnostics
+			}
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		current := s.docs[doc.uri]
-		if current == nil || current.version != version || current.file == nil {
+		if current != doc || current.version != version || current.file == nil {
 			return
 		}
-		ctx.Notify(protocol.ServerTextDocumentPublishDiagnostics, s.diagnostics(current))
+		ctx.Notify(protocol.ServerTextDocumentPublishDiagnostics, result)
 	})
 }
 
@@ -183,11 +207,15 @@ func (s *Server) diagnostics(doc *document) protocol.PublishDiagnosticsParams {
 		if d.Key == "diagnostic.unexpected" && arg == "" {
 			arg = s.t("diagnostic.endOfInput")
 		}
+		message := s.t(d.Key, arg)
+		if d.Key == "diagnostic.unclosed" {
+			message = s.t(d.Key, arg, d.Construct, d.OpeningLine)
+		}
 		out = append(out, protocol.Diagnostic{
 			Range:    toRange(f, d.Start, d.End),
 			Severity: &severity,
 			Source:   &source,
-			Message:  s.t(d.Key, arg),
+			Message:  message,
 		})
 	}
 	version := uint32(doc.version)
@@ -270,7 +298,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 			rng = toRange(f, sym.Start, sym.End)
 		}
 	case ref != nil:
-		if doc, ok := builtinDocs[ref.Name]; ok {
+		if doc, ok := s.builtinDoc(ref.Name); ok {
 			text = fmt.Sprintf("```lua\n%s\n```\n%s", ref.Name, doc)
 		} else {
 			text = fmt.Sprintf("```lua\nglobal %s\n```\n%s", ref.Name, s.t("hover.globalUndefined"))
@@ -295,9 +323,26 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	f := doc.file
 	offset := f.OffsetOf(fromPosition(params.Position))
 
-	// After `.` or `:` we would need type information; offer nothing rather than noise.
-	if prefixEndsWith(f.Text, offset, '.') || prefixEndsWith(f.Text, offset, ':') {
-		return protocol.CompletionList{IsIncomplete: false, Items: []protocol.CompletionItem{}}, nil
+	if f.InStringOrComment(offset) {
+		return protocol.CompletionList{Items: []protocol.CompletionItem{}}, nil
+	}
+	if receiver, method, ok := memberReceiver(f.Text, offset); ok {
+		// A dangling member access can make tree-sitter discard its enclosing
+		// function, hiding parameters and locals. Complete it in a temporary
+		// parse so lexical shadowing survives while the user is typing.
+		if len(f.Diagnostics) > 0 && len(receiver) > 0 {
+			repaired := append([]byte{}, f.Text[:offset]...)
+			repaired = append(repaired, []byte("__lua_devtools_completion()")...)
+			repaired = append(repaired, f.Text[offset:]...)
+			candidate := analysis.Parse(repaired)
+			defer candidate.Close()
+			if len(candidate.Diagnostics) == 0 {
+				f = candidate
+			}
+		}
+		f.ModuleMembers = s.moduleResolver(params.TextDocument.URI)
+		defer func() { f.ModuleMembers = nil }()
+		return memberCompletions(f, offset, receiver, method, s.runtime), nil
 	}
 
 	var items []protocol.CompletionItem
@@ -320,6 +365,9 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	}
 	names := make([]string, 0, len(builtinDocs))
 	for name := range builtinDocs {
+		if _, ok := s.builtinDoc(name); !ok {
+			continue
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -330,6 +378,12 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		}
 		add(name, kind, builtinDocs[name])
 	}
+	if s.runtime == nil || s.runtime.globals["warn"] {
+		add("warn", protocol.CompletionItemKindFunction, "warn(message, ...)")
+	}
+	if s.runtime != nil && s.runtime.version == "Lua 5.5" {
+		add("global", protocol.CompletionItemKindKeyword, s.t("completion.keyword"))
+	}
 	for _, kw := range luaKeywords {
 		add(kw, protocol.CompletionItemKindKeyword, s.t("completion.keyword"))
 	}
@@ -338,8 +392,10 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 
 // Commands the VS Code extension registers; the server only names them.
 const (
-	CommandRun   = "luaDevtools.run"
-	CommandDebug = "luaDevtools.debug"
+	CommandRun       = "luaDevtools.run"
+	CommandDebug     = "luaDevtools.debug"
+	CommandRunTest   = "luaDevtools.runTest"
+	CommandDebugTest = "luaDevtools.debugTest"
 )
 
 // codeLens puts "Run" and "Debug" actions on the first line of every Lua file.
@@ -353,10 +409,23 @@ func (s *Server) codeLens(_ *glsp.Context, params *protocol.CodeLensParams) ([]p
 		return nil, nil
 	}
 	first := protocol.Range{Start: protocol.Position{Line: 0, Character: 0}, End: protocol.Position{Line: 0, Character: 0}}
-	return []protocol.CodeLens{
+	lenses := []protocol.CodeLens{
 		{Range: first, Command: &protocol.Command{Title: s.t("codelens.run"), Command: CommandRun, Arguments: []any{doc.uri}}},
 		{Range: first, Command: &protocol.Command{Title: s.t("codelens.debug"), Command: CommandDebug, Arguments: []any{doc.uri}}},
-	}, nil
+	}
+	appendTests := func(tests []analysis.TestCase, framework string) {
+		for _, test := range tests {
+			position := toPosition(doc.file.PositionOf(test.Start))
+			span := protocol.Range{Start: position, End: position}
+			lenses = append(lenses,
+				protocol.CodeLens{Range: span, Command: &protocol.Command{Title: s.t("codelens.runTest"), Command: CommandRunTest, Arguments: []any{doc.uri, test.Name, framework}}},
+				protocol.CodeLens{Range: span, Command: &protocol.Command{Title: s.t("codelens.debugTest"), Command: CommandDebugTest, Arguments: []any{doc.uri, test.Name, framework}}},
+			)
+		}
+	}
+	appendTests(doc.file.LuaUnitTests(), "luaunit")
+	appendTests(doc.file.BustedTests(), "busted")
+	return lenses, nil
 }
 
 // --- helpers ------------------------------------------------------------------------
@@ -399,27 +468,28 @@ func offsetAt(text []byte, pos protocol.Position) int {
 	return i
 }
 
-// prefixEndsWith reports whether the identifier being typed at offset is preceded by sep.
-func prefixEndsWith(text []byte, offset int, sep byte) bool {
-	i := offset
-	for i > 0 {
-		c := text[i-1]
-		if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
-			i--
-			continue
-		}
-		break
-	}
-	return i > 0 && text[i-1] == sep
-}
-
 var luaKeywords = []string{
 	"and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
 	"local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
 }
 
-// builtinDocs lists the standard globals of Lua 5.4 with a one-line description.
+// builtinDoc follows the interpreter's actual globals, with a Lua 5.4 fallback.
+func (s *Server) builtinDoc(name string) (string, bool) {
+	if s.runtime != nil && !s.runtime.globals[name] {
+		return "", false
+	}
+	if s.runtime == nil && (name == "bit32" || name == "loadstring" || name == "unpack") {
+		return "", false
+	}
+	doc, ok := builtinDocs[name]
+	return doc, ok
+}
+
+// builtinDocs describes globals across supported Lua versions; builtinDoc filters availability.
 var builtinDocs = map[string]string{
+	"bit32":          "library: bitwise operations (Lua 5.2)",
+	"loadstring":     "loadstring(string [, chunkname]) compiles a Lua chunk",
+	"unpack":         "unpack(list [, i [, j]]) returns elements of a list",
 	"assert":         "assert(v [, message]) raises an error if v is false or nil",
 	"collectgarbage": "collectgarbage([opt [, arg]]) controls the garbage collector",
 	"dofile":         "dofile([filename]) runs a Lua file",

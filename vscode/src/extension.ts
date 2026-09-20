@@ -23,23 +23,41 @@ export function activate(context: vscode.ExtensionContext): void {
 
 // Targets of the "Run" / "Debug" code lenses (served by lua-lsp) and editor title buttons.
 function registerRunCommands(context: vscode.ExtensionContext): void {
-  const launch = async (target: unknown, noDebug: boolean) => {
+  const launch = async (target: unknown, noDebug: boolean, testName?: string, framework?: string) => {
     const uri = target instanceof vscode.Uri ? target : typeof target === 'string' ? vscode.Uri.parse(target) : vscode.window.activeTextEditor?.document.uri;
     if (!uri || uri.scheme !== 'file') {
       void vscode.window.showErrorMessage(vscode.l10n.t('Open a Lua file first.'));
       return;
     }
-    await vscode.workspace.saveAll(false);
+    if (!await vscode.workspace.saveAll(false)) return;
     const folder = vscode.workspace.getWorkspaceFolder(uri);
+    const busted = framework === 'busted';
+    // Busted filters are Lua patterns, not regular expressions. Anchor and escape
+    // every magic character so selecting one test never runs a similarly named one.
+    const filter = testName !== undefined ? '^' + testName.replace(/[\^$()%.\[\]*+?\-]/g, '%$&') + '$' : '';
     await vscode.debug.startDebugging(
       folder,
-      { type: 'lua', request: 'launch', name: noDebug ? vscode.l10n.t('Run Lua file') : vscode.l10n.t('Debug Lua file'), program: uri.fsPath },
+      {
+        type: 'lua', request: 'launch',
+        name: testName ? `${noDebug ? vscode.l10n.t('Run Lua test') : vscode.l10n.t('Debug Lua test')}: ${testName}`
+          : noDebug ? vscode.l10n.t('Run Lua file') : vscode.l10n.t('Debug Lua file'),
+        program: busted ? path.join(context.extensionPath, 'lua', 'busted-runner.lua') : uri.fsPath,
+        ...(busted ? { cwd: folder?.uri.fsPath ?? path.dirname(uri.fsPath), args: ['--ignore-lua', '--filter=' + filter, '--', uri.fsPath] }
+          : testName ? { args: [testName] } : {}),
+      },
       { noDebug },
     );
   };
   context.subscriptions.push(
     vscode.commands.registerCommand('luaDevtools.run', (target?: unknown) => launch(target, true)),
     vscode.commands.registerCommand('luaDevtools.debug', (target?: unknown) => launch(target, false)),
+    ...(['runTest', 'debugTest'] as const).map(command => vscode.commands.registerCommand(`luaDevtools.${command}`,
+      (target: unknown, testName: unknown, framework: unknown = 'luaunit') => {
+        if (typeof testName !== 'string' || testName.includes('\0')) return;
+        if (framework !== 'luaunit' && framework !== 'busted') return;
+        if (framework === 'luaunit' && !/^[A-Za-z_]\w*(\.[A-Za-z_]\w*)?$/.test(testName)) return;
+        return launch(target, command === 'runTest', testName, framework);
+      })),
   );
 }
 
@@ -59,11 +77,24 @@ function startLanguageClient(context: vscode.ExtensionContext): void {
     'luaDevtools',
     vscode.l10n.t('Lua DevTools Language Server'),
     { command: lsp, transport: TransportKind.stdio },
-    { documentSelector: [{ scheme: 'file', language: 'lua' }] },
+    {
+      documentSelector: [{ scheme: 'file', language: 'lua' }],
+      initializationOptions: () => ({
+        luaPath: vscode.workspace.getConfiguration('luaDevtools').get<string>('luaPath'),
+        useInterpreter: vscode.workspace.isTrusted,
+        workspaceRoots: vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? [],
+      }),
+    },
   );
   // `luaDevtools.trace.server` in settings controls the JSON-RPC trace in the Output panel.
   void client.start();
-  context.subscriptions.push({ dispose: () => void client?.stop() });
+  context.subscriptions.push(
+    { dispose: () => void client?.stop() },
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration('luaDevtools.luaPath')) void client?.restart();
+    }),
+    vscode.workspace.onDidGrantWorkspaceTrust(() => void client?.restart()),
+  );
 }
 
 function registerDebugger(context: vscode.ExtensionContext): void {

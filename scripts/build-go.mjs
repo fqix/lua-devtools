@@ -2,7 +2,7 @@
 // Build the Go servers (lua-dap, lua-lsp) into vscode/bin/<target>/.
 //   node scripts/build-go.mjs                    # host platform, also copied flat into vscode/bin/ for F5
 //   node scripts/build-go.mjs --target linux-x64
-//   node scripts/build-go.mjs --test             # go vet + go test -race
+//   node scripts/build-go.mjs --test             # go vet + unit/integration tests (-race where supported)
 // tree-sitter is compiled through cgo, so a target can only be built on a matching host.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
@@ -28,7 +28,10 @@ const run = (args, env = {}) =>
 
 if (values.test) {
   run(['vet', './...']);
-  run(['test', '-race', './...']);
+  // Go does not support the race detector on windows/arm64. Keep it on
+  // every other published platform, including the Windows x64 job.
+  const race = HOST === 'win32-arm64' ? [] : ['-race'];
+  run(['test', ...race, '-tags=integration', '-count=1', '-timeout=60s', './...']);
   process.exit(0);
 }
 

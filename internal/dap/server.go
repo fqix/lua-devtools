@@ -79,6 +79,11 @@ func NewServer(r io.Reader, w io.Writer, opts Options) *Server {
 
 // Run reads and handles requests until the client disconnects.
 func (s *Server) Run() error {
+	defer func() {
+		if s.rt != nil {
+			s.rt.Dispose()
+		}
+	}()
 	for {
 		msg, err := dap.ReadProtocolMessage(s.reader)
 		if err != nil {
@@ -112,10 +117,7 @@ func (s *Server) handle(msg dap.Message) bool {
 	case *dap.ConfigurationDoneRequest:
 		s.onConfigurationDone(req)
 	case *dap.ThreadsRequest:
-		s.send(&dap.ThreadsResponse{
-			Response: s.newResponse(req.Request),
-			Body:     dap.ThreadsResponseBody{Threads: []dap.Thread{{Id: threadID, Name: "main"}}},
-		})
+		s.onThreads(req)
 	case *dap.StackTraceRequest:
 		s.onStackTrace(req)
 	case *dap.ScopesRequest:
@@ -125,15 +127,15 @@ func (s *Server) handle(msg dap.Message) bool {
 	case *dap.EvaluateRequest:
 		s.onEvaluate(req)
 	case *dap.ContinueRequest:
-		s.onResume(req.Request, "continue", func() dap.Message {
+		s.onResume(req.Request, req.Arguments.ThreadId, "continue", func() dap.Message {
 			return &dap.ContinueResponse{Response: s.newResponse(req.Request), Body: dap.ContinueResponseBody{AllThreadsContinued: true}}
 		})
 	case *dap.NextRequest:
-		s.onResume(req.Request, "next", func() dap.Message { return &dap.NextResponse{Response: s.newResponse(req.Request)} })
+		s.onResume(req.Request, req.Arguments.ThreadId, "next", func() dap.Message { return &dap.NextResponse{Response: s.newResponse(req.Request)} })
 	case *dap.StepInRequest:
-		s.onResume(req.Request, "stepIn", func() dap.Message { return &dap.StepInResponse{Response: s.newResponse(req.Request)} })
+		s.onResume(req.Request, req.Arguments.ThreadId, "stepIn", func() dap.Message { return &dap.StepInResponse{Response: s.newResponse(req.Request)} })
 	case *dap.StepOutRequest:
-		s.onResume(req.Request, "stepOut", func() dap.Message { return &dap.StepOutResponse{Response: s.newResponse(req.Request)} })
+		s.onResume(req.Request, req.Arguments.ThreadId, "stepOut", func() dap.Message { return &dap.StepOutResponse{Response: s.newResponse(req.Request)} })
 	case *dap.TerminateRequest:
 		if s.rt != nil {
 			s.rt.Dispose()
@@ -231,7 +233,7 @@ func (s *Server) pumpEvents(rt *Runtime) {
 		case "stopped":
 			s.send(&dap.StoppedEvent{
 				Event: s.newEvent("stopped"),
-				Body:  dap.StoppedEventBody{Reason: ev.Reason, ThreadId: threadID, Text: ev.Text, AllThreadsStopped: true},
+				Body:  dap.StoppedEventBody{Reason: ev.Reason, ThreadId: ev.ThreadID, Text: ev.Text, AllThreadsStopped: true},
 			})
 		case "output":
 			s.send(&dap.OutputEvent{
@@ -301,11 +303,27 @@ func (s *Server) requirePaused(req *dap.Request, code int) bool {
 	return true
 }
 
+func (s *Server) onThreads(req *dap.ThreadsRequest) {
+	out := []dap.Thread{{Id: threadID, Name: "main"}}
+	if s.rt != nil && s.rt.Paused() {
+		threads, err := s.rt.Threads()
+		if err != nil {
+			s.sendError(&req.Request, 1004, err.Error())
+			return
+		}
+		out = []dap.Thread{}
+		for _, thread := range threads {
+			out = append(out, dap.Thread{Id: thread.ID, Name: thread.Name})
+		}
+	}
+	s.send(&dap.ThreadsResponse{Response: s.newResponse(req.Request), Body: dap.ThreadsResponseBody{Threads: out}})
+}
+
 func (s *Server) onStackTrace(req *dap.StackTraceRequest) {
 	if !s.requirePaused(&req.Request, 1004) {
 		return
 	}
-	frames, err := s.rt.Stack()
+	frames, err := s.rt.Stack(req.Arguments.ThreadId)
 	if err != nil {
 		s.sendError(&req.Request, 1004, err.Error())
 		return
@@ -373,11 +391,11 @@ func (s *Server) onEvaluate(req *dap.EvaluateRequest) {
 	})
 }
 
-func (s *Server) onResume(req dap.Request, cmd string, response func() dap.Message) {
+func (s *Server) onResume(req dap.Request, thread int, cmd string, response func() dap.Message) {
 	if !s.requirePaused(&req, 1008) {
 		return
 	}
-	if err := s.rt.Resume(cmd, nil); err != nil {
+	if err := s.rt.Resume(cmd, map[string]any{"threadId": thread}); err != nil {
 		s.sendError(&req, 1008, err.Error())
 		return
 	}

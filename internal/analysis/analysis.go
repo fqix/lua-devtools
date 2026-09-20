@@ -92,20 +92,25 @@ type Reference struct {
 // Diagnostic carries a message key (see internal/i18n) plus its argument so the
 // language server can render it in the client's locale.
 type Diagnostic struct {
-	Start, End int
-	Key        string // "diagnostic.missing" | "diagnostic.unexpected"
-	Arg        string
+	Start, End  int
+	Key         string // "diagnostic.missing" | "diagnostic.unexpected"
+	Arg         string
+	Construct   string
+	OpeningLine int
 }
 
 type File struct {
-	Text        []byte
-	Root        *Scope
-	Diagnostics []Diagnostic
-	References  []Reference
-	Globals     map[string]*Symbol
-	lines       []int // byte offset of every line start
+	// ModuleMembers optionally resolves statically named module exports without execution.
+	ModuleMembers func(string) []Member
+	Text          []byte
+	Root          *Scope
+	Diagnostics   []Diagnostic
+	References    []Reference
+	Globals       map[string]*Symbol
+	lines         []int // byte offset of every line start
 
-	tree *tree_sitter.Tree
+	tree         *tree_sitter.Tree
+	memberWrites []memberWrite
 }
 
 // Parse analyses one document. Call Close when done with it.
@@ -135,6 +140,7 @@ func Parse(text []byte) *File {
 			f.References[i].Symbol = f.Globals[f.References[i].Name]
 		}
 	}
+	f.collectMembers(root)
 	return f
 }
 
@@ -151,6 +157,10 @@ const maxDiagnostics = 50
 
 func (f *File) collectDiagnostics(root *tree_sitter.Node) {
 	if !root.HasError() {
+		return
+	}
+	if diagnostic := f.unclosedConstruct(root); diagnostic != nil {
+		f.Diagnostics = append(f.Diagnostics, *diagnostic)
 		return
 	}
 	var visit func(n *tree_sitter.Node)

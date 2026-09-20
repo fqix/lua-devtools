@@ -171,7 +171,7 @@ func TestDiagnostics(t *testing.T) {
 	if len(f.Diagnostics) == 0 {
 		t.Fatal("expected a syntax error")
 	}
-	if k := f.Diagnostics[0].Key; k != "diagnostic.missing" && k != "diagnostic.unexpected" {
+	if k := f.Diagnostics[0].Key; k != "diagnostic.missing" && k != "diagnostic.unexpected" && k != "diagnostic.unclosed" {
 		t.Errorf("key = %q", k)
 	}
 }

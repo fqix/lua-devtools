@@ -10,6 +10,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const program = path.resolve(process.argv[2] ?? path.join(root, 'examples', 'hello.lua'));
 const bpLine = Number(process.argv[3] ?? 2);
 
+// Bound protocol failures so a broken version fails CI instead of waiting for the job timeout.
+const watchdog = setTimeout(() => {
+  console.error('DAP smoke test timed out');
+  adapter.kill();
+  process.exit(1);
+}, 30000);
 const adapter = spawn(path.join(root, 'vscode', 'bin', 'lua-dap'), [], { stdio: ['pipe', 'pipe', 'inherit'] });
 
 let seq = 1;
@@ -64,7 +70,11 @@ const terminated = waitEvent('terminated');
 const initialized = waitEvent('initialized');
 await send('initialize', { adapterID: 'lua', linesStartAt1: true, columnsStartAt1: true, pathFormat: 'path' });
 await initialized;
-const launchDone = send('launch', { program, stopOnEntry: false });
+const launchDone = send('launch', {
+  program,
+  stopOnEntry: false,
+  ...(process.env.LUA_TEST_BINARY ? { luaPath: process.env.LUA_TEST_BINARY } : {}),
+});
 await send('setBreakpoints', { source: { path: program }, breakpoints: [{ line: bpLine }] });
 // Events can arrive before the response that triggers them: register waiters first.
 let stoppedEvent = waitEvent('stopped');
@@ -88,4 +98,5 @@ await send('continue', { threadId: 1 });
 await terminated;
 await send('disconnect');
 adapter.stdin.end();
+clearTimeout(watchdog);
 console.log('== done');

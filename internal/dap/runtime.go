@@ -11,13 +11,15 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fqix/lua-devtools/internal/i18n"
 )
 
 // Runtime wraps a `lua debugger.lua <script>` process.
 //
-// Protocol: commands go to stdin, replies and events come from stdout, one JSON per line.
+// Protocol: commands go to stdin; replies and events use a private session file.
+// stdout and stderr carry only program output.
 // Lua only reads stdin while paused, so breakpoint changes made while running are
 // queued and flushed on the next `stopped` event.
 type Runtime struct {
@@ -28,6 +30,7 @@ type Runtime struct {
 	nextID             int
 	pending            map[int]chan reply
 	paused             bool
+	activeThread       int
 	pendingBreakpoints map[string][]SourceBreakpoint
 	closed             bool
 	locale             string
@@ -83,6 +86,7 @@ type EvaluateInfo struct {
 type Event struct {
 	Kind string // "stopped" | "output" | "exited" | "exit" | "breakpointsChanged"
 
+	ThreadID int    // stopped
 	Reason   string // stopped
 	File     string // stopped
 	Line     int    // stopped
@@ -100,6 +104,7 @@ type message struct {
 	Body  json.RawMessage `json:"body"`
 	Error *string         `json:"error"`
 
+	ThreadID int    `json:"threadId"`
 	Event    string `json:"event"`
 	Path     string `json:"path"` // resolvePath
 	Reason   string `json:"reason"`
@@ -142,15 +147,24 @@ func (r *Runtime) Start(opts LaunchOptions) error {
 	if err != nil {
 		return err
 	}
-	stdout, err := cmd.StdoutPipe()
+	protocol, err := os.CreateTemp("", "lua-devtools-protocol-*")
 	if err != nil {
+		_ = stdin.Close()
 		return err
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
+	cleanup := func() {
+		_ = protocol.Close()
+		_ = os.Remove(protocol.Name())
 	}
+	cmd.Env = append(cmd.Env, "LUA_DEVTOOLS_PROTOCOL="+protocol.Name())
+	stdout := &outputStream{runtime: r, category: "stdout"}
+	stderr := &outputStream{runtime: r, category: "stderr"}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.WaitDelay = 2 * time.Second
 	if err := cmd.Start(); err != nil {
+		cleanup()
+		_ = stdin.Close()
 		if errors.Is(err, exec.ErrNotFound) || os.IsNotExist(err) {
 			return errors.New(i18n.T(r.locale, "dap.luaNotFoundAt", opts.LuaPath))
 		}
@@ -163,15 +177,43 @@ func (r *Runtime) Start(opts LaunchOptions) error {
 	r.paused = true
 	r.mu.Unlock()
 
-	go r.readStdout(stdout)
-	go r.readStderr(stderr)
+	done := make(chan struct{})
+	var waitErr error
+	go func() {
+		waitErr = cmd.Wait()
+		stdout.flush()
+		stderr.flush()
+		close(done)
+	}()
+	go func() {
+		defer cleanup()
+		r.readProtocol(&protocolReader{file: protocol, done: done})
+		<-done
+		code := 0
+		if waitErr != nil {
+			code = 1
+			var exitErr *exec.ExitError
+			if errors.As(waitErr, &exitErr) {
+				code = exitErr.ExitCode()
+			}
+		}
+		r.mu.Lock()
+		r.closed = true
+		for id, ch := range r.pending {
+			ch <- reply{err: errors.New("Lua process exited")}
+			delete(r.pending, id)
+		}
+		r.mu.Unlock()
+		r.Events <- Event{Kind: "exited", ExitCode: code}
+		r.Events <- Event{Kind: "exit", ExitCode: code}
+	}()
 	go r.flushPendingBreakpoints()
 	return nil
 }
 
 // Dispose kills the process if it is still running.
 func (r *Runtime) Dispose() {
-	if r.cmd != nil && r.cmd.Process != nil && r.cmd.ProcessState == nil {
+	if r.cmd != nil && r.cmd.Process != nil {
 		_ = r.cmd.Process.Kill()
 	}
 }
@@ -196,6 +238,9 @@ func (r *Runtime) send(cmd string, payload map[string]any) (json.RawMessage, err
 	_, err := r.stdin.Write(append(line, '\n'))
 	r.mu.Unlock()
 	if err != nil {
+		r.mu.Lock()
+		delete(r.pending, id)
+		r.mu.Unlock()
 		return nil, err
 	}
 
@@ -225,6 +270,10 @@ func (r *Runtime) Paused() bool {
 // before the reply arrives so later breakpoint changes get queued.
 func (r *Runtime) Resume(cmd string, payload map[string]any) error {
 	r.mu.Lock()
+	if id, ok := payload["threadId"].(int); ok && id > 0 && cmd != "continue" && cmd != "run" && id != r.activeThread {
+		r.mu.Unlock()
+		return fmt.Errorf("only the currently stopped coroutine can be stepped")
+	}
 	r.paused = false
 	r.mu.Unlock()
 	return r.call(cmd, payload, nil)
@@ -254,11 +303,28 @@ func (r *Runtime) SetBreakpoints(file string, bps []SourceBreakpoint) ([]Verifie
 	return body.Breakpoints, err
 }
 
-func (r *Runtime) Stack() ([]StackFrameInfo, error) {
+type ThreadInfo struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+func (r *Runtime) Threads() ([]ThreadInfo, error) {
+	var body struct {
+		Threads []ThreadInfo `json:"threads"`
+	}
+	err := r.call("threads", nil, &body)
+	return body.Threads, err
+}
+
+func (r *Runtime) Stack(threadIDs ...int) ([]StackFrameInfo, error) {
 	var body struct {
 		Frames []StackFrameInfo `json:"frames"`
 	}
-	err := r.call("stack", nil, &body)
+	payload := map[string]any{}
+	if len(threadIDs) > 0 {
+		payload["threadId"] = threadIDs[0]
+	}
+	err := r.call("stack", payload, &body)
 	return body.Frames, err
 }
 
@@ -288,50 +354,21 @@ func (r *Runtime) Evaluate(expression string, frameID int) (EvaluateInfo, error)
 	return body, err
 }
 
-func (r *Runtime) readStdout(stdout io.Reader) {
-	scanner := bufio.NewScanner(stdout)
+func (r *Runtime) readProtocol(reader io.Reader) {
+	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
 		var msg message
-		if err := json.Unmarshal(line, &msg); err != nil {
-			// The script wrote to stdout directly, bypassing print; show it as plain output.
-			r.Events <- Event{Kind: "output", Category: "stdout", Text: string(line) + "\n"}
-			continue
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			r.Events <- Event{Kind: "output", Category: "stderr", Text: "Invalid debugger protocol: " + err.Error() + "\n"}
+			r.Dispose()
+			return
 		}
 		r.handleMessage(msg)
 	}
-	// stdout closed: the process is gone.
-	err := r.cmd.Wait()
-	code := 0
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			code = exitErr.ExitCode()
-		}
-	}
-	r.mu.Lock()
-	r.closed = true
-	for id, ch := range r.pending {
-		ch <- reply{err: errors.New("Lua process exited")}
-		delete(r.pending, id)
-	}
-	r.mu.Unlock()
-	r.Events <- Event{Kind: "exit", ExitCode: code}
-}
-
-func (r *Runtime) readStderr(stderr io.Reader) {
-	buf := make([]byte, 4096)
-	for {
-		n, err := stderr.Read(buf)
-		if n > 0 {
-			r.Events <- Event{Kind: "output", Category: "stderr", Text: string(buf[:n])}
-		}
-		if err != nil {
-			return
-		}
+	if err := scanner.Err(); err != nil {
+		r.Events <- Event{Kind: "output", Category: "stderr", Text: "Debugger protocol read failed: " + err.Error() + "\n"}
+		r.Dispose()
 	}
 }
 
@@ -354,6 +391,7 @@ func (r *Runtime) handleMessage(msg message) {
 	switch msg.Event {
 	case "stopped":
 		r.mu.Lock()
+		r.activeThread = msg.ThreadID
 		r.paused = true
 		r.mu.Unlock()
 		// Flushing sends commands and waits for replies that this very goroutine
@@ -361,12 +399,10 @@ func (r *Runtime) handleMessage(msg message) {
 		// breakpoint updates reach the client first.
 		go func() {
 			r.flushPendingBreakpoints()
-			r.Events <- Event{Kind: "stopped", Reason: msg.Reason, File: msg.File, Line: msg.Line, Text: msg.Text}
+			r.Events <- Event{Kind: "stopped", ThreadID: msg.ThreadID, Reason: msg.Reason, File: msg.File, Line: msg.Line, Text: msg.Text}
 		}()
 	case "output":
 		r.Events <- Event{Kind: "output", Category: msg.Category, Text: msg.Text}
-	case "exited":
-		r.Events <- Event{Kind: "exited", ExitCode: msg.ExitCode}
 	case "resolvePath":
 		// Lua asks for the canonical form of a chunk path so breakpoint matching
 		// uses the same symlink-resolved paths as setBreakpoints.
