@@ -48,8 +48,7 @@ stop=2
 		t.Fatalf("snapshot shape: %s", result.JSON)
 	}
 	for _, tt := range []struct{ name, message string }{
-		{"cyclic", "circular"}, {"mixed", "string keys"}, {"binary", "UTF-8"},
-		{"infinite", "infinity"}, {"huge", "512 KiB"}, {"deep", "32 levels"}, {"large", "10000"}, {"sparse", "string keys"},
+		{"huge", "512 KiB"}, {"deep", "32 levels"}, {"large", "10000"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			runtimeRequest(t, func() error {
@@ -65,6 +64,29 @@ stop=2
 			})
 		})
 	}
+	for _, name := range []string{"cyclic", "mixed", "binary", "infinite", "sparse"} {
+		t.Run(name, func(t *testing.T) {
+			runtimeRequest(t, func() error {
+				v, err := r.Evaluate(name, 1)
+				if err != nil {
+					return err
+				}
+				snapshot, err := r.snapshot(v.VariablesReference)
+				if err != nil {
+					return err
+				}
+				var tagged map[string]any
+				if err := json.Unmarshal([]byte(snapshot.JSON), &tagged); err != nil {
+					return err
+				}
+				if tagged["$format"] != "lua-table-v1" {
+					t.Fatalf("missing tagged snapshot: %s", snapshot.JSON)
+				}
+				return nil
+			})
+		})
+	}
+
 	runtimeRequest(t, func() error { return r.Resume("next", nil) })
 	runtimeEvent(t, r, "stopped")
 	runtimeRequest(t, func() error { _, err := r.Evaluate("value", 1); return err })
@@ -101,7 +123,19 @@ assert(json.decode(json.encode(text)) == text)
 assert(json.decode(snapshot({text}))[1] == text)
 local binary = string.char(255)
 assert(json.encode(binary) == '"' .. binary .. '"')
-assert(not pcall(snapshot, {binary}))
+local bytes = json.decode(snapshot({binary}))
+assert(bytes.root.entries[1].value.hex == "ff")
+local cycle = {}; cycle.self = cycle; cycle[cycle] = "table key"
+local tagged = json.decode(snapshot(cycle))
+assert(tagged.root["$id"] == 1 and tagged["$format"] == "lua-table-v1")
+local refs = 0
+for _, entry in ipairs(tagged.root.entries) do
+ if type(entry.key)=="table" and entry.key["$ref"]==1 then refs=refs+1 end
+ if type(entry.value)=="table" and entry.value["$ref"]==1 then refs=refs+1 end
+end
+assert(refs == 2)
+local reserved = { ["$ref"]="literal", [4]=math.huge }
+assert(json.decode(snapshot(reserved)).root.entries[1].value.value == "+Infinity")
 assert(json.encode(binary) == '"' .. binary .. '"')
 local function trap() error("metamethod invoked") end
 local thread = coroutine.create(trap)
