@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +129,9 @@ io.stdout:write("no newline")`)
 				}
 			case "exit":
 				want := "{\"event\":\"stopped\",\"reason\":\"fake\"}\n{\"id\":1,\"body\":{}}\nprefixtail\n" + strings.Repeat("界", 50000) + "no newline"
+				if runtime.GOOS == "windows" {
+					want = strings.ReplaceAll(want, "\n", "\r\n")
+				}
 				if stdout.String() != want || stderr.String() != "stderr without newline" || exited != 1 {
 					t.Fatalf("output mismatch: stdout bytes=%d want=%d, stderr=%q, exited=%d", stdout.Len(), len(want), stderr.String(), exited)
 				}

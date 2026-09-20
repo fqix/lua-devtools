@@ -46,7 +46,8 @@ func inspectInterpreter(path string) *interpreter {
 	if err != nil {
 		return nil
 	}
-	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	// Windows Lua writes CRLF through its text-mode stdout.
+	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n")), "\n")
 	if len(lines) == 0 || (lines[0] != "Lua 5.2" && lines[0] != "Lua 5.3" && lines[0] != "Lua 5.4" && lines[0] != "Lua 5.5") {
 		return nil
 	}
