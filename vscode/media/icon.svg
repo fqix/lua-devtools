@@ -1,22 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <!-- Lua DevTools: a Lua-blue planet with a satellite (Lua's "moon" motif), a breakpoint dot and a step arrow. -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1e293b"/>
-      <stop offset="1" stop-color="#0f172a"/>
-    </linearGradient>
-    <linearGradient id="planet" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#3b82f6"/>
-      <stop offset="1" stop-color="#1d4ed8"/>
-    </linearGradient>
-  </defs>
-  <rect width="256" height="256" rx="56" fill="url(#bg)"/>
+  <!-- Lua DevTools, in the palette of the Lua logo: navy planet and white moon on white,
+       with an orbit ring; a red breakpoint and a step arrow mark the debugger. -->
+  <rect width="256" height="256" rx="56" fill="#ffffff"/>
+  <!-- orbit -->
+  <circle cx="128" cy="128" r="104" fill="none" stroke="#000080" stroke-width="6" />
   <!-- planet -->
-  <circle cx="122" cy="134" r="66" fill="url(#planet)"/>
-  <!-- satellite: the small circle from the Lua logo motif -->
-  <circle cx="196" cy="60" r="18" fill="#93c5fd"/>
-  <!-- breakpoint dot on the planet -->
-  <circle cx="98" cy="118" r="17" fill="#ef4444"/>
+  <circle cx="128" cy="128" r="76" fill="#000080"/>
+  <!-- moon, cut into the planet's upper-right like the Lua logo -->
+  <circle cx="163" cy="93" r="21" fill="#ffffff"/>
+  <!-- moon on the orbit -->
+  <circle cx="210" cy="55" r="15" fill="#000080"/>
+  <!-- breakpoint -->
+  <circle cx="100" cy="112" r="14" fill="#e11d1d"/>
   <!-- step-over arrow -->
-  <path d="M118 158 h44 l-14 -14 m14 14 l-14 14" fill="none" stroke="#f8fafc" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M104 156 h46 l-14 -14 m14 14 l-14 14" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
