@@ -46,6 +46,16 @@
       {
         "command": "luaDevtools.viewTableJSON",
         "title": "%command.viewTableJSON%"
+      },
+      {
+        "command": "luaDevtools.refreshInterpreters",
+        "title": "%command.refreshInterpreters%",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "luaDevtools.enterInterpreterPath",
+        "title": "%command.enterInterpreterPath%",
+        "icon": "$(add)"
       }
     ],
     "breakpoints": [
@@ -194,8 +204,44 @@
           "when": "debugType == lua && debugState == stopped && variableType == table",
           "group": "luaTable@0"
         }
+      ],
+      "view/title": [
+        {
+          "command": "luaDevtools.enterInterpreterPath",
+          "when": "view == luaDevtools.environments",
+          "group": "navigation@1"
+        },
+        {
+          "command": "luaDevtools.refreshInterpreters",
+          "when": "view == luaDevtools.environments",
+          "group": "navigation@2"
+        }
       ]
-    }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "luaDevtools",
+          "title": "Lua DevTools",
+          "icon": "media/environments.svg"
+        }
+      ]
+    },
+    "views": {
+      "luaDevtools": [
+        {
+          "id": "luaDevtools.environments",
+          "name": "%view.environments%"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "luaDevtools.environments",
+        "contents": "%view.environments.trust%",
+        "when": "!isWorkspaceTrusted"
+      }
+    ]
   },
   "scripts": {
     "build": "node esbuild.mjs",

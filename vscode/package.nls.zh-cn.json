@@ -18,5 +18,9 @@
   "launch.packageCPath": "追加到 LUA_CPATH 的 C 模块搜索模式（优先于解释器默认值），例如 \"${workspaceFolder}/lib/?.so\"。",
   "launch.env": "Lua 进程的环境变量。",
   "command.selectInterpreter": "Lua DevTools: 选择解释器",
-  "command.viewTableJSON": "查看表（JSON）"
+  "command.viewTableJSON": "查看表（JSON）",
+  "command.refreshInterpreters": "Lua DevTools: 刷新环境",
+  "command.enterInterpreterPath": "Lua DevTools: 输入解释器路径…",
+  "view.environments": "Lua 环境",
+  "view.environments.trust": "信任此工作区后可发现 Lua 解释器。\n[管理工作区信任](command:workbench.trust.manage)"
 }

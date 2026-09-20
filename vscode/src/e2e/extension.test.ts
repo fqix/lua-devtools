@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
+import { InterpreterTreeProvider } from '../interpreterView';
 
 function until<T>(probe: () => T | undefined | false | null, timeout = 20000, what = 'condition'): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -88,8 +89,44 @@ suite('Lua DevTools end to end', function () {
 
   test('registers its commands', async () => {
     const commands = await vscode.commands.getCommands(true);
-    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter', 'luaDevtools.viewTableJSON']) {
+    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter', 'luaDevtools.viewTableJSON', 'luaDevtools.refreshInterpreters', 'luaDevtools.enterInterpreterPath']) {
       assert.ok(commands.includes(name), `${name} is registered`);
+    }
+  });
+
+  test('environment tree selects interpreters and restores automatic detection', async () => {
+    const config = vscode.workspace.getConfiguration('luaDevtools');
+    const previous = config.inspect<string>('luaPath')?.workspaceValue;
+    const provider = new InterpreterTreeProvider();
+    let changes = 0;
+    const listener = provider.onDidChangeTreeData(() => changes++);
+    try {
+      await vscode.commands.executeCommand('luaDevtools.environments.focus');
+      const rows = await provider.getChildren();
+      const interpreter = rows.find(row => row.contextValue === 'luaInterpreter');
+      assert.ok(interpreter?.command, 'a discovered interpreter is available');
+      const details = await provider.getChildren(interpreter);
+      assert.equal(details[0].label, interpreter.executable);
+      await vscode.commands.executeCommand(interpreter.command.command, ...interpreter.command.arguments!);
+      assert.equal(vscode.workspace.getConfiguration('luaDevtools').get('luaPath'), interpreter.executable);
+      provider.refresh();
+      const selected = await provider.getChildren();
+      assert.equal(selected.find(row => row.id === interpreter.id)?.iconPath instanceof vscode.ThemeIcon, true);
+      assert.equal((selected.find(row => row.id === interpreter.id)?.iconPath as vscode.ThemeIcon).id, 'check');
+      const automatic = selected.find(row => row.id === 'automatic')!;
+      await vscode.commands.executeCommand(automatic.command!.command, ...automatic.command!.arguments!);
+      assert.equal(vscode.workspace.getConfiguration('luaDevtools').get('luaPath'), '');
+      provider.refresh();
+      assert.equal(((await provider.getChildren())[0].iconPath as vscode.ThemeIcon).id, 'check');
+      await config.update('luaPath', join(folder().uri.fsPath, 'missing-lua'), vscode.ConfigurationTarget.Workspace);
+      provider.refresh();
+      assert.ok((await provider.getChildren()).some(row => (row.iconPath as vscode.ThemeIcon)?.id === 'warning'));
+      assert.equal(changes, 3);
+      await vscode.commands.executeCommand('luaDevtools.refreshInterpreters');
+    } finally {
+      listener.dispose();
+      provider.dispose();
+      await config.update('luaPath', previous, vscode.ConfigurationTarget.Workspace);
     }
   });
 

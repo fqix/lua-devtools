@@ -18,5 +18,9 @@
   "launch.packageCPath": "Extra C module search patterns added to LUA_CPATH before the interpreter defaults, e.g. \"${workspaceFolder}/lib/?.so\".",
   "launch.env": "Environment variables for the Lua process.",
   "command.selectInterpreter": "Lua DevTools: Select Interpreter",
-  "command.viewTableJSON": "View Table as JSON"
+  "command.viewTableJSON": "View Table as JSON",
+  "command.refreshInterpreters": "Lua DevTools: Refresh Environments",
+  "command.enterInterpreterPath": "Lua DevTools: Enter Interpreter Path…",
+  "view.environments": "Lua Environments",
+  "view.environments.trust": "Trust this workspace to discover Lua interpreters.\n[Manage Workspace Trust](command:workbench.trust.manage)"
 }

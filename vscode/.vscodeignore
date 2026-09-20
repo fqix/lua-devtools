@@ -14,3 +14,4 @@
 !package.nls*.json
 !l10n/**
 !media/icon.png
+!media/environments.svg

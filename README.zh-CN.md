@@ -51,6 +51,8 @@ Busted 支持 `describe`、`context`、`insulate`、`expose` 下的 `it`、`spec
 
 打开 Lua 文件后，点击状态栏的解释器版本，或运行 **Lua DevTools: 选择解释器**。列表会发现 PATH 和常见 Homebrew 安装中的 Lua 5.1–5.5 / LuaJIT 2.1，也可输入绝对路径或 PATH 中的命令，或恢复自动检测。选择保存到工作区的 `luaDevtools.luaPath`（未打开工作区时保存到用户设置），并自动重启语言服务；之后的运行和调试使用该解释器。多根工作区共用此选择；launch 配置中的 `luaPath` 仍优先。不受信任的工作区需先授予信任才能探测解释器。
 
+侧边栏 **Lua DevTools** 中提供 **Lua 环境** 树。点击解释器即可切换，展开可查看可执行文件路径；点击 **+** 手动输入路径，点击刷新重新扫描。当前解释器有选中标记，点击 **使用自动检测** 可恢复默认查找。此视图管理已有解释器，不安装 Lua 或创建虚拟环境。
+
 | 设置 | 说明 |
 |---|---|
 | `luaDevtools.luaPath` | Lua 解释器路径；为空时依次查找 `lua5.4`、Homebrew `lua@5.4`、`lua` |

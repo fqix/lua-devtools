@@ -51,6 +51,8 @@ Discovery is static: local LuaUnit suites, dynamically generated cases/names, cu
 
 With a Lua file open, click the interpreter version in the status bar or run **Lua DevTools: Select Interpreter**. The picker discovers Lua 5.1–5.5 / LuaJIT 2.1 on PATH and in common Homebrew locations. You can also enter an absolute executable path or a command on PATH, or restore automatic detection. Selection updates workspace `luaDevtools.luaPath` (user settings when no workspace is open) and restarts the language server; subsequent runs and debug sessions use it. Multi-root workspaces share this selection; a launch configuration’s `luaPath` still takes precedence. Interpreter probing requires workspace trust.
 
+The **Lua DevTools** sidebar contains a **Lua Environments** tree. Click an interpreter to select it, expand it to see its executable path, use **+** to enter a path, or refresh to rescan. The current interpreter is marked; **Use automatic detection** restores the default lookup. This view lists existing interpreters; it does not install Lua or create virtual environments.
+
 | Setting | Description |
 |---|---|
 | `luaDevtools.luaPath` | Lua interpreter; when empty, `lua5.4`, Homebrew `lua@5.4` and `lua` are tried in order |
