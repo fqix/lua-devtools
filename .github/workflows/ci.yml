@@ -72,6 +72,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends luarocks liblua5.4-dev
           luarocks --lua-version=5.4 --tree="$RUNNER_TEMP/lua-test-rocks" install luaunit 3.4
           luarocks --lua-version=5.4 --tree="$RUNNER_TEMP/lua-test-rocks" install busted 2.2.0
+          luarocks --lua-version=5.4 --tree="$RUNNER_TEMP/lua-test-rocks" install luasocket 3.1.0
           echo "LUA_PATH=$(luarocks --lua-version=5.4 --tree="$RUNNER_TEMP/lua-test-rocks" path --lr-path);;" >> "$GITHUB_ENV"
           echo "LUA_CPATH=$(luarocks --lua-version=5.4 --tree="$RUNNER_TEMP/lua-test-rocks" path --lr-cpath);;" >> "$GITHUB_ENV"
 
@@ -82,8 +83,28 @@ jobs:
           lua_prefix="$(brew --prefix lua@5.4)"
           luarocks --lua-version=5.4 --lua-dir="$lua_prefix" --tree="$RUNNER_TEMP/lua-test-rocks" install luaunit 3.4
           luarocks --lua-version=5.4 --lua-dir="$lua_prefix" --tree="$RUNNER_TEMP/lua-test-rocks" install busted 2.2.0
+          luarocks --lua-version=5.4 --lua-dir="$lua_prefix" --tree="$RUNNER_TEMP/lua-test-rocks" install luasocket 3.1.0
           echo "LUA_PATH=$(luarocks --lua-version=5.4 --lua-dir="$lua_prefix" --tree="$RUNNER_TEMP/lua-test-rocks" path --lr-path);;" >> "$GITHUB_ENV"
           echo "LUA_CPATH=$(luarocks --lua-version=5.4 --lua-dir="$lua_prefix" --tree="$RUNNER_TEMP/lua-test-rocks" path --lr-cpath);;" >> "$GITHUB_ENV"
+
+      - name: Configure package and socket regression tests
+        if: matrix.e2e
+        shell: bash
+        run: |
+          echo "LUAROCKS_TEST_BINARY=$(command -v luarocks)" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = macOS ]; then
+            echo "LUAROCKS_TEST_LUA=$(brew --prefix lua@5.4)/bin/lua5.4" >> "$GITHUB_ENV"
+          else
+            echo "LUAROCKS_TEST_LUA=$(command -v lua5.4)" >> "$GITHUB_ENV"
+          fi
+          echo 'LUA_TEST_SOCKET_REQUIRED=1' >> "$GITHUB_ENV"
+
+      - name: Install StyLua for formatting tests
+        if: matrix.e2e
+        shell: bash
+        run: |
+          cargo install stylua --version 2.5.2 --locked
+          echo "STYLUA_TEST_BINARY=$(command -v stylua)" >> "$GITHUB_ENV"
 
       # cgo on Windows needs a C compiler; the hosted image ships MinGW but keep it explicit.
       - name: Ensure a C compiler (Windows)
@@ -135,6 +156,9 @@ jobs:
 
       - name: Check types
         run: npm run check
+
+      - name: Test extension helpers and package lifecycle
+        run: npm run test:extension
 
       - name: Vet and test Go packages (race detector where supported)
         run: npm run test:go

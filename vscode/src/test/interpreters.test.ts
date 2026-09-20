@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { automaticInterpreter, discoverInterpreters, inspectInterpreter, resolveInterpreter } from '../interpreters';
@@ -45,7 +47,8 @@ test('discovers distinct PATH interpreters, deduplicates symlinks, validates ver
   }
 });
 
-import { applyPackagePaths, installArguments, packageEnvironment, validPackageName } from '../projectPackages';
+import { applyPackagePaths, installedPackages, installArguments, packageEnvironment, parseInstalledPackages, parsePackageSpec,
+  removeArguments, validPackageName, validPackageVersion } from '../projectPackages';
 
 test('project packages isolate interpreter identities and preserve explicit search paths', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'lua packages '));
@@ -79,6 +82,66 @@ test('project packages isolate interpreter identities and preserve explicit sear
       assert.throws(() => installArguments(lua, invalid));
     }
     assert.equal(validPackageName('owner/package-name'), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('package versions, namespaced listings and mutations stay scoped to one tree', () => {
+  const environment = { executable: '/lua/bin/lua', version: '5.4', tree: path.resolve('isolated packages'), luaDir: '/lua' };
+  const repository = path.join(environment.tree, 'lib', 'luarocks', 'rocks-5.4');
+  assert.deepEqual(parsePackageSpec(' owner/pkg@1.2.3-1 '), { name: 'owner/pkg', version: '1.2.3-1' });
+  assert.deepEqual(parsePackageSpec('luaunit'), { name: 'luaunit' });
+  for (const value of ['pkg@', 'pkg@--force', 'pkg@1@2', '--server=x', 'pkg@1;command', '../pkg', 'pkg@1 2']) assert.equal(parsePackageSpec(value), undefined);
+  for (const value of ['', '--force', '../1', '1/2', '1\n2']) {
+    assert.equal(validPackageVersion(value), false);
+    assert.throws(() => removeArguments(environment, 'pkg', value));
+    assert.throws(() => installArguments(environment, 'pkg', value));
+  }
+  const output = [
+    `pkg\t1.2-1\tinstalled\t${repository}\towner`,
+    `pkg\t1.2-1\tinstalled\t${repository}\towner`,
+    `pkg\t2.0-1\tinstalled\t${repository}`,
+    `system\t1.0-1\tinstalled\t${path.resolve('system tree')}`,
+    `remote\t1.0-1\trockspec\t${repository}`,
+    `bad\t--force\tinstalled\t${repository}`,
+  ].join('\r\n');
+  assert.deepEqual(parseInstalledPackages(output, environment), [{ name: 'owner/pkg', version: '1.2-1' }, { name: 'pkg', version: '2.0-1' }]);
+  assert.deepEqual(removeArguments(environment, 'pkg', '1.2-1').slice(-5), ['remove', '--deps-mode', 'one', 'pkg', '1.2-1']);
+  assert.ok(installArguments(environment, 'pkg', '1.2-1').includes('1.2-1'));
+  assert.ok(!installArguments(environment, 'pkg').includes('--force'));
+});
+
+test('LuaRocks installs a chosen version, upgrades and safely removes project packages', { skip: !process.env.LUAROCKS_TEST_BINARY }, async () => {
+  const rocks = process.env.LUAROCKS_TEST_BINARY!;
+  const executable = process.env.LUAROCKS_TEST_LUA || await automaticInterpreter();
+  assert.ok(executable);
+  const interpreter = await inspectInterpreter(executable);
+  assert.ok(interpreter);
+  const root = await mkdtemp(path.join(tmpdir(), 'lua rocks lifecycle '));
+  const run = promisify(execFile);
+  try {
+    const environment = await packageEnvironment(root, interpreter);
+    const repository = path.join(root, 'repository');
+    await mkdir(repository);
+    const common = ['--lua-version', environment.version, '--lua-dir', environment.luaDir, '--tree', path.join(root, 'build-tree')];
+    for (const [name, version, dependency] of [['fixture_pkg', '1.0-1', ''], ['fixture_pkg', '2.0-1', ''], ['fixture_dependent', '1.0-1', '"fixture_pkg >= 1.0"']]) {
+      await writeFile(path.join(repository, `${name}.lua`), `return {version="${version}"}`);
+      const spec = `${name}-${version}.rockspec`;
+      await writeFile(path.join(repository, spec), `package="${name}"\nversion="${version}"\nsource={url="file:///unused"}\ndependencies={${dependency}}\nbuild={type="builtin",modules={${name}="${name}.lua"}}`);
+      await run(rocks, [...common, 'make', '--pack-binary-rock', '--deps-mode', 'none', spec], { cwd: repository });
+    }
+    await run(path.join(path.dirname(rocks), process.platform === 'win32' ? 'luarocks-admin.bat' : 'luarocks-admin'),
+      ['--lua-version', environment.version, 'make_manifest', repository], { cwd: root });
+    const server = ['--only-server', 'file://' + repository];
+    await run(rocks, [...server, ...installArguments(environment, 'fixture_pkg', '1.0-1')], { cwd: root });
+    assert.deepEqual(await installedPackages(rocks, environment, root), [{ name: 'fixture_pkg', version: '1.0-1' }]);
+    await run(rocks, [...server, ...installArguments(environment, 'fixture_pkg')], { cwd: root });
+    assert.deepEqual(await installedPackages(rocks, environment, root), [{ name: 'fixture_pkg', version: '2.0-1' }]);
+    assert.match(await readFile(path.join(environment.tree, 'share', 'lua', environment.version, 'fixture_pkg.lua'), 'utf8'), /2\.0-1/);
+    await run(rocks, [...server, ...installArguments(environment, 'fixture_dependent')], { cwd: root });
+    await assert.rejects(run(rocks, removeArguments(environment, 'fixture_pkg', '2.0-1'), { cwd: root }));
+    await run(rocks, removeArguments(environment, 'fixture_dependent', '1.0-1'), { cwd: root });
+    await run(rocks, removeArguments(environment, 'fixture_pkg', '2.0-1'), { cwd: root });
+    assert.deepEqual(await installedPackages(rocks, environment, root), []);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

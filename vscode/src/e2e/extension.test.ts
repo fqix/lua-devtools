@@ -2,10 +2,15 @@
 // bin/lua-lsp and bin/lua-dap servers over a scratch workspace.
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import * as vscode from 'vscode';
 import { formatLua } from '../formatter';
-import { automaticInterpreter, inspectInterpreter } from '../interpreters';
-import { packageEnvironment } from '../projectPackages';
+import { automaticInterpreter, discoverInterpreters, inspectInterpreter } from '../interpreters';
+import { packageEnvironment, removeArguments } from '../projectPackages';
+import { languageEnvironment } from '../languageEnvironment';
 import { InterpreterTreeProvider } from '../interpreterView';
 
 function until<T>(probe: () => T | undefined | false | null, timeout = 20000, what = 'condition'): Promise<T> {
@@ -92,7 +97,7 @@ suite('Lua DevTools end to end', function () {
 
   test('registers its commands', async () => {
     const commands = await vscode.commands.getCommands(true);
-    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter', 'luaDevtools.viewTableJSON', 'luaDevtools.refreshInterpreters', 'luaDevtools.enterInterpreterPath', 'luaDevtools.installPackage']) {
+    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter', 'luaDevtools.viewTableJSON', 'luaDevtools.refreshInterpreters', 'luaDevtools.enterInterpreterPath', 'luaDevtools.installPackage', 'luaDevtools.upgradePackage', 'luaDevtools.uninstallPackage', 'luaDevtools.installPackageVersion', 'luaDevtools.sendInput', 'luaDevtools.closeInput', 'luaDevtools.resumeCoroutine', 'luaDevtools.copyAttachSnippet']) {
       assert.ok(commands.includes(name), `${name} is registered`);
     }
   });
@@ -158,7 +163,9 @@ suite('Lua DevTools end to end', function () {
         const details = await provider.getChildren(row);
         const projects = await provider.getChildren(details[2]);
         const sources = await provider.getChildren(projects[0]);
-        const modules = await provider.getChildren(sources[0]);
+        const moduleGroup = sources.find(item => item.label === 'Project modules');
+        assert.ok(moduleGroup);
+        const modules = await provider.getChildren(moduleGroup);
         assert.ok(modules.some(item => item.label === 'lua_devtools_package_test'));
       } finally { provider.dispose(); }
       for (const noDebug of [false, true]) {
@@ -172,6 +179,60 @@ suite('Lua DevTools end to end', function () {
     } finally {
       await vscode.workspace.fs.delete(module);
       await vscode.workspace.fs.delete(program);
+    }
+  });
+
+  test('shows installed package versions and uninstalls from the environment tree', async function () {
+    const rocks = process.env.LUAROCKS_TEST_BINARY;
+    if (!rocks) { this.skip(); return; }
+    const executable = process.env.LUAROCKS_TEST_LUA || await automaticInterpreter();
+    assert.ok(executable);
+    const interpreter = await inspectInterpreter(executable);
+    assert.ok(interpreter);
+    const config = vscode.workspace.getConfiguration('luaDevtools');
+    const previous = config.inspect<string>('luarocksPath')?.workspaceValue;
+    const env = await packageEnvironment(folder().uri.fsPath, interpreter);
+    const source = await mkdtemp(join(tmpdir(), 'lua-tree-package-'));
+    const run = promisify(execFile);
+    const name = 'devtools_management_fixture';
+    const version = '1.0-1';
+    const provider = new InterpreterTreeProvider();
+    const ended: vscode.TaskProcessEndEvent[] = [];
+    const listener = vscode.tasks.onDidEndTaskProcess(event => ended.push(event));
+    try {
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(join(source, `${name}.lua`)), Buffer.from('return {value=1}'));
+      const spec = `${name}-${version}.rockspec`;
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(join(source, spec)), Buffer.from(`package="${name}"\nversion="${version}"\nsource={url="file:///unused"}\nbuild={type="builtin",modules={${name}="${name}.lua"}}`));
+      await run(rocks, ['--lua-version', env.version, '--lua-dir', env.luaDir, '--tree', env.tree, 'make', '--deps-mode', 'none', spec], { cwd: source });
+      await config.update('luarocksPath', rocks, vscode.ConfigurationTarget.Workspace);
+      const row = (await provider.getChildren()).find(item => item.executable === interpreter.path);
+      assert.ok(row);
+      const groups = await provider.getChildren(row);
+      const projects = await provider.getChildren(groups[2]);
+      const sources = await provider.getChildren(projects[0]);
+      const packages = sources.find(item => item.contextValue === 'luaPackageEnvironment');
+      assert.ok(packages);
+      const installed = (await provider.getChildren(packages)).find(item => item.label === name);
+      assert.ok(installed);
+      assert.equal(installed.description, version);
+      assert.equal(installed.packageTarget?.project, folder().uri.fsPath);
+      assert.equal(installed.packageTarget?.executable, interpreter.path);
+      assert.equal(installed.contextValue, 'luaInstalledPackage');
+      await vscode.commands.executeCommand('luaDevtools.uninstallPackage', installed);
+      const event = await until(() => ended.find(event => event.execution.task.definition.type === 'luaDevtools.package' && event.execution.task.definition.tree === env.tree), 30000, 'package uninstall task');
+      assert.equal(event.exitCode, 0);
+      provider.refresh();
+      const refreshedRow = (await provider.getChildren()).find(item => item.executable === interpreter.path)!;
+      const refreshedGroups = await provider.getChildren(refreshedRow);
+      const refreshedProjects = await provider.getChildren(refreshedGroups[2]);
+      const refreshedSources = await provider.getChildren(refreshedProjects[0]);
+      const refreshedPackages = refreshedSources.find(item => item.contextValue === 'luaPackageEnvironment')!;
+      assert.ok(!(await provider.getChildren(refreshedPackages)).some(item => item.label === name));
+    } finally {
+      listener.dispose(); provider.dispose();
+      await config.update('luarocksPath', previous, vscode.ConfigurationTarget.Workspace);
+      await run(rocks, removeArguments(env, name, version), { cwd: source }).catch(() => {});
+      await rm(source, { recursive: true, force: true });
     }
   });
 
@@ -241,6 +302,114 @@ suite('Lua DevTools end to end', function () {
       assert.equal(locations[0].range.start.line, 0);
     });
 
+    test('finds lexical references, renames safely and shows call signatures', async () => {
+      const uri = fileUri('refactoring.lua');
+      await vscode.workspace.fs.writeFile(uri, Buffer.from('local function add(left, right) return left+right end\nlocal value=add(1, 2)\ndo local value=3; print(value) end\nprint(value)\n'));
+      try {
+        const document = await vscode.workspace.openTextDocument(uri);
+        const refs = await retry(
+          () => vscode.commands.executeCommand<vscode.Location[]>('vscode.executeReferenceProvider', uri, positionOf(document, 'value=add')),
+          values => values.length > 0, 'references',
+        );
+        assert.equal(refs.length, 2);
+        const signature = await vscode.commands.executeCommand<vscode.SignatureHelp>('vscode.executeSignatureHelpProvider', uri, positionOf(document, '2)'));
+        assert.equal(signature.signatures[0].label, 'add(left, right)');
+        assert.equal(signature.activeParameter, 1);
+        const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>('vscode.executeDocumentRenameProvider', uri, positionOf(document, 'value=add'), 'total');
+        assert.equal(edit.get(uri).length, 2);
+        assert.ok(await vscode.workspace.applyEdit(edit));
+        assert.match(document.getText(), /local total=add/);
+        assert.match(document.getText(), /local value=3; print\(value\)/);
+        assert.match(document.getText(), /print\(total\)/);
+        await assert.rejects(Promise.resolve(vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', uri, positionOf(document, 'total=add'), 'end')));
+      } finally { await vscode.workspace.fs.delete(uri); }
+    });
+
+    test('navigates installed Lua packages and unsaved dependency sources', async () => {
+      const executable = await automaticInterpreter();
+      assert.ok(executable);
+      const interpreter = await inspectInterpreter(executable);
+      assert.ok(interpreter);
+      const config = vscode.workspace.getConfiguration('luaDevtools');
+      const previous = config.inspect<string>('luaPath')?.workspaceValue;
+      const env = await packageEnvironment(folder().uri.fsPath, interpreter);
+      const directory = vscode.Uri.file(join(env.tree, 'share', 'lua', env.version, 'navigation_fixture'));
+      const module = vscode.Uri.joinPath(directory, 'init.lua');
+      const main = fileUri('package-navigation.lua');
+      await vscode.workspace.fs.createDirectory(directory);
+      await vscode.workspace.fs.writeFile(module, Buffer.from('local M={}\nfunction M.run() end\nreturn M\n'));
+      await vscode.workspace.fs.writeFile(main, Buffer.from('local m=require("navigation_fixture")\nm.run()\n'));
+      try {
+        await config.update('luaPath', interpreter.path, vscode.ConfigurationTarget.Workspace);
+        const document = await vscode.workspace.openTextDocument(main);
+        await vscode.window.showTextDocument(document);
+        const definitions = () => vscode.commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', main, positionOf(document, 'run()'));
+        const locations = await retry(definitions, values => values.some(value => value.uri.fsPath === module.fsPath), 'installed package definition');
+        assert.equal(locations[0].range.start.line, 1);
+        const dependency = await vscode.workspace.openTextDocument(module);
+        const edit = new vscode.WorkspaceEdit();
+        edit.insert(module, new vscode.Position(0, 0), '-- unsaved dependency\n');
+        await vscode.workspace.applyEdit(edit);
+        assert.ok(dependency.isDirty);
+        await retry(definitions, values => values[0]?.uri.fsPath === module.fsPath && values[0].range.start.line === 2, 'unsaved dependency definition');
+        const options = await languageEnvironment(interpreter.path, true, [folder().uri.fsPath]);
+        assert.equal(options.modulePaths[0].templates[0], join(env.tree, 'share', 'lua', env.version, '?.lua'));
+        const untrusted = await languageEnvironment('/must-not-execute', false, [folder().uri.fsPath]);
+        assert.deepEqual(untrusted.modulePaths, []);
+      } finally {
+        await config.update('luaPath', previous, vscode.ConfigurationTarget.Workspace);
+        await vscode.workspace.fs.delete(main);
+        await vscode.workspace.fs.delete(directory, { recursive: true });
+      }
+    });
+
+    test('switches package definitions with interpreters and reads external search paths', async function () {
+      const interpreters = await discoverInterpreters('');
+      if (interpreters.length < 2) { this.skip(); return; }
+      const config = vscode.workspace.getConfiguration('luaDevtools');
+      const previous = config.inspect<string>('luaPath')?.workspaceValue;
+      const external = await mkdtemp(join(tmpdir(), 'lua-navigation-'));
+      const externalModule = vscode.Uri.file(join(external, 'external_navigation.lua'));
+      const main = fileUri('switch-navigation.lua');
+      const created: vscode.Uri[] = [];
+      const envKeys = ['LUA_PATH', ...['1', '2', '3', '4', '5'].map(version => `LUA_PATH_5_${version}`)];
+      const previousEnv = envKeys.map(key => process.env[key]);
+      try {
+        for (const key of envKeys) process.env[key] = join(external, '?.lua') + ';;';
+        await vscode.workspace.fs.writeFile(externalModule, Buffer.from('local M={}\nfunction M.external() end\nreturn M'));
+        await vscode.workspace.fs.writeFile(main, Buffer.from('local m=require("switch_navigation")\nm.run()\nlocal e=require("external_navigation")\ne.external()'));
+        const document = await vscode.workspace.openTextDocument(main);
+        for (const interpreter of interpreters.slice(0, 2)) {
+          const env = await packageEnvironment(folder().uri.fsPath, interpreter);
+          const directory = vscode.Uri.file(join(env.tree, 'share', 'lua', env.version));
+          const module = vscode.Uri.joinPath(directory, 'switch_navigation.lua');
+          await vscode.workspace.fs.createDirectory(directory);
+          await vscode.workspace.fs.writeFile(module, Buffer.from('local M={}\nfunction M.run() end\nreturn M'));
+          created.push(module);
+          await config.update('luaPath', interpreter.path, vscode.ConfigurationTarget.Workspace);
+          await retry(
+            () => vscode.commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', main, positionOf(document, 'run()')),
+            values => values[0]?.uri.fsPath === module.fsPath,
+            `definition for ${interpreter.path}`,
+          );
+          await retry(
+            () => vscode.commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', main, positionOf(document, 'external()')),
+            values => values[0]?.uri.fsPath === externalModule.fsPath,
+            'external interpreter search path',
+          );
+        }
+      } finally {
+        envKeys.forEach((key, index) => {
+          if (previousEnv[index] === undefined) delete process.env[key];
+          else process.env[key] = previousEnv[index];
+        });
+        await config.update('luaPath', previous, vscode.ConfigurationTarget.Workspace);
+        for (const module of created) await vscode.workspace.fs.delete(module);
+        await vscode.workspace.fs.delete(main);
+        await rm(external, { recursive: true, force: true });
+      }
+    });
+
     test('hovers a local', async () => {
       const hovers = await vscode.commands.executeCommand<vscode.Hover[]>(
         'vscode.executeHoverProvider',
@@ -264,7 +433,12 @@ suite('Lua DevTools end to end', function () {
     });
 
     test('offers Run and Debug code lenses', async () => {
-      const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', doc.uri, 10);
+      // Interpreter changes restart the language client and briefly unregister providers.
+      const lenses = await retry(
+        () => vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', doc.uri, 10),
+        values => values.length > 0,
+        'code lenses after interpreter change',
+      );
       const commands = lenses.map((l) => l.command?.command);
       assert.ok(commands.includes('luaDevtools.run') && commands.includes('luaDevtools.debug'), `lenses: ${commands}`);
     });
@@ -319,6 +493,16 @@ suite('Lua DevTools end to end', function () {
       assert.equal(snapshot.document.languageId, 'json');
       assert.deepEqual(JSON.parse(snapshot.document.getText()), {a:10,b:20,nested:[true,"中文"]});
 
+      const complex = await session.customRequest('evaluate', { expression: '(function() local t={[2]="two", bytes=string.char(255), n=math.huge}; t.self=t; return t end)()', frameId: stackFrames[0].id });
+      await vscode.commands.executeCommand('luaDevtools.viewTableJSON', {
+        sessionId: session.id, variable: { name: 'complex', type: 'table', variablesReference: complex.variablesReference },
+      });
+      const taggedEditor = await until(() => vscode.window.visibleTextEditors.find(editor => editor.document.uri.scheme === 'lua-table' && editor.document.uri.path.includes('complex')), 10000, 'complex table view');
+      const tagged = JSON.parse(taggedEditor.document.getText());
+      assert.equal(tagged.$format, 'lua-table-v1');
+      assert.equal(tagged.root.entries.find((entry: any) => entry.key === 'self').value.$ref, tagged.root.$id);
+      assert.equal(tagged.root.entries.find((entry: any) => entry.key === 'bytes').value.hex, 'ff');
+
       await session.customRequest('continue', { threadId: 1 });
       await until(() => recorder.event('terminated'), 30000, 'terminated event');
       assert.equal(recorder.event('exited').body.exitCode, 0);
@@ -332,6 +516,72 @@ suite('Lua DevTools end to end', function () {
       await until(() => recorder.event('terminated'), 30000, 'terminated event');
       assert.equal(recorder.event('stopped'), undefined, 'breakpoints are ignored without debugging');
       assert.match(recorder.outputs(), /total:\t30/);
+    });
+
+    test('keeps interactive stdin separate from debugger commands', async () => {
+      const uri = fileUri('interactive.lua');
+      await vscode.workspace.fs.writeFile(uri, Buffer.from('print("INPUT_READY")\nlocal input=io.read("*a")\nassert(input=="中文\\n")\nprint("INPUT_OK")'));
+      try {
+        const { session, recorder } = await startSession(() => vscode.debug.startDebugging(folder(), {
+          type: 'lua', request: 'launch', name: 'Interactive e2e', program: uri.fsPath, interactive: true,
+        }));
+        await until(() => recorder.outputs().includes('INPUT_READY'), 15000, 'program input prompt');
+        await session.customRequest('lua/input', { text: '中文\n', eof: true });
+        await until(() => recorder.event('terminated'), 15000, 'interactive exit');
+        assert.equal(recorder.event('exited').body.exitCode, 0, recorder.outputs());
+        assert.match(recorder.outputs(), /INPUT_OK/);
+      } finally { await vscode.workspace.fs.delete(uri); }
+    });
+
+    test('attaches to an embedded-style host and leaves it alive on disconnect', async () => {
+      const lua = await automaticInterpreter(); assert.ok(lua);
+      const uri = fileUri('attach-host.lua');
+      const bootstrap = join(vscode.extensions.getExtension('fqix.lua-devtools')!.extensionPath, 'lua', 'lua-devtools.lua').replace(/\\/g, '/');
+      await vscode.workspace.fs.writeFile(uri, Buffer.from(`local before=coroutine.create\nlocal dbg=dofile(${JSON.stringify(bootstrap)}).listen {port=0, token="e2e", ready=function(_, port) print("PORT:"..port); io.stdout:flush() end}\nlocal value=40\nvalue=value+2\ndbg.stop()\nassert(coroutine.create==before)\nprint("HOST_OK:"..value)`));
+      const host = spawn(lua, [uri.fsPath], { cwd: folder().uri.fsPath });
+      let output = ''; host.stdout.on('data', data => { output += data; }); host.stderr.on('data', data => { output += data; });
+      const exited = new Promise<number | null>(resolve => host.once('exit', resolve));
+      const breakpoint = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(3, 0)));
+      vscode.debug.addBreakpoints([breakpoint]);
+      try {
+        const port = await until(() => { const match = output.match(/PORT:(\d+)/); return match && Number(match[1]); }, 10000, 'attach host port');
+        const { session, recorder } = await startSession(() => vscode.debug.startDebugging(folder(), {
+          type: 'lua', request: 'attach', name: 'Attach e2e', port, token: 'e2e', cwd: folder().uri.fsPath,
+        }));
+        await until(() => recorder.event('stopped'), 15000, 'attached breakpoint');
+        const { stackFrames } = await session.customRequest('stackTrace', { threadId: 1 });
+        const result = await session.customRequest('evaluate', { expression: 'value', frameId: stackFrames[0].id });
+        assert.equal(result.result, '40');
+        await vscode.debug.stopDebugging(session);
+        await until(() => output.includes('HOST_OK:42'), 15000, 'host survives detach');
+        assert.equal(await exited, 0, output);
+      } finally { host.kill(); vscode.debug.removeBreakpoints([breakpoint]); await vscode.workspace.fs.delete(uri); }
+    });
+
+    test('resumes a suspended coroutine and inspects caught coroutine errors', async () => {
+      const uri = fileUri('coroutine-control.lua');
+      await vscode.workspace.fs.writeFile(uri, Buffer.from('local co=coroutine.create(function() coroutine.yield(); _G.resumed=42 end)\nassert(coroutine.resume(co))\nlocal stop=1\nassert(resumed==42)\nlocal failed=coroutine.create(function() local secret=7; error("CAUGHT") end)\nlocal ok=coroutine.resume(failed)\nassert(not ok)'));
+      const breakpoint = new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(2, 0)));
+      vscode.debug.addBreakpoints([breakpoint]);
+      try {
+        const { session, recorder } = await startSession(() => vscode.debug.startDebugging(folder(), {
+          type: 'lua', request: 'launch', name: 'Coroutine e2e', program: uri.fsPath, breakOnCoroutineErrors: true,
+        }));
+        await until(() => recorder.event('stopped'), 15000, 'caller breakpoint');
+        const { threads } = await session.customRequest('threads');
+        const suspended = threads.find((thread: any) => thread.name.includes('(suspended)')); assert.ok(suspended);
+        const stops = () => recorder.messages.filter(message => message.event === 'stopped');
+        await session.customRequest('lua/resumeCoroutine', { threadId: suspended.id });
+        await until(() => stops().length >= 2, 15000, 'coroutine resumed');
+        await session.customRequest('continue', { threadId: 1 });
+        const failed = await until(() => stops().find(message => message.body.reason === 'exception'), 15000, 'caught coroutine error');
+        const { stackFrames } = await session.customRequest('stackTrace', { threadId: failed.body.threadId });
+        const result = await session.customRequest('evaluate', { expression: 'secret', frameId: stackFrames[0].id });
+        assert.equal(result.result, '7');
+        await session.customRequest('continue', { threadId: failed.body.threadId });
+        await until(() => recorder.event('terminated'), 15000, 'coroutine exit');
+        assert.equal(recorder.event('exited').body.exitCode, 0, recorder.outputs());
+      } finally { vscode.debug.removeBreakpoints([breakpoint]); await vscode.workspace.fs.delete(uri); }
     });
 
     for (const framework of [
