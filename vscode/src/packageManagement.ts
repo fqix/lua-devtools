@@ -102,6 +102,7 @@ export function registerPackageManagement(context: vscode.ExtensionContext): voi
 }
 
 export async function configureProjectPackages(folder: vscode.WorkspaceFolder | undefined, config: vscode.DebugConfiguration): Promise<vscode.DebugConfiguration> {
+  if (config.request === 'attach') return config;
   if (!folder || !vscode.workspace.isTrusted) return config;
   const selected = config.luaPath || vscode.workspace.getConfiguration('luaDevtools').get<string>('luaPath') || await automaticInterpreter();
   const interpreter = selected ? await inspectInterpreter(selected) : undefined;

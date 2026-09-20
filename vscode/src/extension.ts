@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { registerPackageManagement, configureProjectPackages } from './packageManagement';
 import { registerFormatting } from './formatting';
+import { registerDebugControls } from './debugControls';
 import { registerTableView } from './tableView';
 import { registerInterpreterSelection } from './interpreterSelection';
 import { languageEnvironment, type LanguageEnvironment } from './languageEnvironment';
@@ -26,6 +27,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerFormatting(context);
   registerPackageManagement(context);
   registerDebugger(context);
+  registerDebugControls(context);
   registerRunCommands(context);
   startLanguageClient(context);
 }
@@ -147,6 +149,7 @@ function registerDebugger(context: vscode.ExtensionContext): void {
     vscode.debug.registerDebugConfigurationProvider('lua', {
       resolveDebugConfigurationWithSubstitutedVariables: configureProjectPackages,
       resolveDebugConfiguration(_folder, config) {
+        if (config.request === 'attach') return config;
         if (!config.type && !config.request && !config.name) {
           const editor = vscode.window.activeTextEditor;
           if (editor && editor.document.languageId === 'lua') {

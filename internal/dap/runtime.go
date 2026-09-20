@@ -2,10 +2,12 @@ package dap
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,9 +25,13 @@ import (
 // With the optional native helper, Lua also reads commands from debug hooks.
 // Otherwise running breakpoint changes are flushed on the next stop.
 type Runtime struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	commands chan []byte // one writer; bounded so a blocked native call cannot stall DAP
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	commands   chan []byte // one writer; bounded so a blocked native call cannot stall DAP
+	connection net.Conn
+	input      io.WriteCloser
+	inputQueue chan inputChunk
+	inputMu    sync.Mutex
 
 	mu                 sync.Mutex
 	nextID             int
@@ -119,6 +125,7 @@ type message struct {
 }
 
 type LaunchOptions struct {
+	Interactive    bool
 	LuaPath        string
 	DebuggerScript string
 	Program        string
@@ -142,10 +149,24 @@ func NewRuntime() *Runtime {
 // Start spawns the Lua process. debugger.lua blocks waiting for `run`, so the
 // runtime is considered paused right away and queued breakpoints are flushed.
 func (r *Runtime) Start(opts LaunchOptions) error {
+	var listener *net.TCPListener
+	var token string
+	if opts.Interactive {
+		var err error
+		listener, err = net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+		if err != nil {
+			return err
+		}
+		defer listener.Close()
+		token = rand.Text()
+	}
 	args := append([]string{opts.DebuggerScript, opts.Program}, opts.Args...)
 	cmd := exec.Command(opts.LuaPath, args...)
 	cmd.Dir = opts.Cwd
-	cmd.Env = buildEnv(opts)
+	cmd.Env = append(buildEnv(opts), "LUA_DEVTOOLS_CONNECT=", "LUA_DEVTOOLS_TOKEN=")
+	if listener != nil {
+		cmd.Env = append(cmd.Env, "LUA_DEVTOOLS_CONNECT="+listener.Addr().String(), "LUA_DEVTOOLS_TOKEN="+token)
+	}
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -176,19 +197,76 @@ func (r *Runtime) Start(opts LaunchOptions) error {
 	}
 	r.cmd = cmd
 	r.stdin = stdin
+	var networkReader io.Reader
+	if listener != nil {
+		_ = listener.SetDeadline(time.Now().Add(5 * time.Second))
+		connection, err := listener.AcceptTCP()
+		if err == nil {
+			_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))
+			reader := bufio.NewReader(connection)
+			var authentication struct {
+				Token string `json:"token"`
+			}
+			line, readErr := reader.ReadSlice('\n')
+			if readErr != nil || json.Unmarshal(line, &authentication) != nil || authentication.Token != token {
+				err = errors.New("invalid debugger connection token")
+			} else {
+				networkReader = reader
+			}
+			_ = connection.SetReadDeadline(time.Time{})
+		}
+		if err != nil {
+			if connection != nil {
+				_ = connection.Close()
+			}
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+			_ = stdin.Close()
+			cleanup()
+			return fmt.Errorf("interactive debugging requires LuaSocket in the selected environment: %w", err)
+		}
+		r.connection = connection
+		r.stdin = connection
+		r.input = stdin
+	}
 
 	r.mu.Lock()
 	r.paused = true
 	r.mu.Unlock()
 
 	done := make(chan struct{})
+	if opts.Interactive {
+		r.inputQueue = make(chan inputChunk, 16)
+		go func() {
+			defer func() {
+				r.inputMu.Lock()
+				r.input = nil
+				r.inputMu.Unlock()
+			}()
+			for {
+				select {
+				case <-done:
+					return
+				case chunk := <-r.inputQueue:
+					if _, err := io.WriteString(stdin, chunk.text); err != nil {
+						return
+					}
+					if chunk.eof {
+						_ = stdin.Close()
+						return
+					}
+				}
+			}
+		}()
+	}
+	control := r.stdin
 	go func() {
 		for {
 			select {
 			case <-done:
 				return
 			case line := <-r.commands:
-				if _, err := stdin.Write(line); err != nil {
+				if _, err := control.Write(line); err != nil {
 					r.Dispose()
 					return
 				}
@@ -201,10 +279,17 @@ func (r *Runtime) Start(opts LaunchOptions) error {
 		stdout.flush()
 		stderr.flush()
 		close(done)
+		if r.connection != nil {
+			_ = r.connection.Close()
+		}
 	}()
 	go func() {
 		defer cleanup()
-		r.readProtocol(&protocolReader{file: protocol, done: done})
+		if networkReader != nil {
+			r.readProtocol(networkReader)
+		} else {
+			r.readProtocol(&protocolReader{file: protocol, done: done})
+		}
 		<-done
 		code := 0
 		if waitErr != nil {
@@ -249,6 +334,9 @@ func (r *Runtime) Start(opts LaunchOptions) error {
 
 // Dispose kills the process if it is still running.
 func (r *Runtime) Dispose() {
+	if r.connection != nil {
+		_ = r.connection.Close()
+	}
 	if r.cmd != nil && r.cmd.Process != nil {
 		_ = r.cmd.Process.Kill()
 	}
@@ -306,7 +394,7 @@ func (r *Runtime) Paused() bool {
 // before the reply arrives so later breakpoint changes get queued.
 func (r *Runtime) Resume(cmd string, payload map[string]any) error {
 	r.mu.Lock()
-	if id, ok := payload["threadId"].(int); ok && id > 0 && cmd != "continue" && cmd != "run" && id != r.activeThread {
+	if id, ok := payload["threadId"].(int); ok && id > 0 && cmd != "continue" && cmd != "run" && cmd != "resumeThread" && id != r.activeThread {
 		r.mu.Unlock()
 		return fmt.Errorf("only the currently stopped coroutine can be stepped")
 	}
@@ -315,7 +403,13 @@ func (r *Runtime) Resume(cmd string, payload map[string]any) error {
 		r.liveControl = false
 	}
 	r.mu.Unlock()
-	return r.call(cmd, payload, nil)
+	err := r.call(cmd, payload, nil)
+	if err != nil {
+		r.mu.Lock()
+		r.paused = true
+		r.mu.Unlock()
+	}
+	return err
 }
 
 func (r *Runtime) SetBreakpoints(file string, bps []SourceBreakpoint) ([]VerifiedBreakpoint, error) {
@@ -457,7 +551,7 @@ func (r *Runtime) readProtocol(reader io.Reader) {
 		}
 		r.handleMessage(msg)
 	}
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !errors.Is(err, net.ErrClosed) {
 		r.Events <- Event{Kind: "output", Category: "stderr", Text: "Debugger protocol read failed: " + err.Error() + "\n"}
 		r.Dispose()
 	}

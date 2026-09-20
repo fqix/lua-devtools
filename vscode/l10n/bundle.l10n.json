@@ -50,5 +50,11 @@
   "Cannot manage Lua package: {0}": "Cannot manage Lua package: {0}",
   "Configure LuaRocks to list installed packages.": "Configure LuaRocks to list installed packages.",
   "No installed packages.": "No installed packages.",
-  "Project modules": "Project modules"
+  "Project modules": "Project modules",
+  "Start a Lua launch session with interactive: true to send input.": "Start a Lua launch session with interactive: true to send input.",
+  "Send Lua program input": "Send Lua program input",
+  "Send a line to the program’s standard input.": "Send a line to the program’s standard input.",
+  "Lua attach bootstrap copied. Run it in a host with LuaSocket, then start an attach configuration.": "Lua attach bootstrap copied. Run it in a host with LuaSocket, then start an attach configuration.",
+  "No suspended Lua coroutines.": "No suspended Lua coroutines.",
+  "Resume a suspended coroutine": "Resume a suspended coroutine"
 }

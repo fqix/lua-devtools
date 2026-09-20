@@ -52,5 +52,11 @@
   "Cannot manage Lua package: {0}": "无法管理 Lua 包：{0}",
   "Configure LuaRocks to list installed packages.": "请配置 LuaRocks 以查看已安装包。",
   "No installed packages.": "尚未安装包。",
-  "Project modules": "项目模块"
+  "Project modules": "项目模块",
+  "Start a Lua launch session with interactive: true to send input.": "请使用 interactive: true 启动 Lua 调试会话后发送输入。",
+  "Send Lua program input": "发送 Lua 程序输入",
+  "Send a line to the program’s standard input.": "向程序的标准输入发送一行内容。",
+  "Lua attach bootstrap copied. Run it in a host with LuaSocket, then start an attach configuration.": "已复制 Lua 附加调试引导代码。在安装了 LuaSocket 的宿主中运行，然后启动 attach 配置。",
+  "No suspended Lua coroutines.": "没有挂起的 Lua 协程。",
+  "Resume a suspended coroutine": "恢复挂起的协程"
 }

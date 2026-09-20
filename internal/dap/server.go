@@ -25,12 +25,14 @@ const threadID = 1
 
 // LaunchArguments mirrors the `launch` configuration in package.json.
 type LaunchArguments struct {
-	Program     string   `json:"program"`
-	Args        []string `json:"args"`
-	Cwd         string   `json:"cwd"`
-	LuaPath     string   `json:"luaPath"`
-	StopOnEntry bool     `json:"stopOnEntry"`
-	NoDebug     bool     `json:"noDebug"` // set by the client for "Run Without Debugging"
+	Interactive            bool     `json:"interactive"`
+	BreakOnCoroutineErrors bool     `json:"breakOnCoroutineErrors"`
+	Program                string   `json:"program"`
+	Args                   []string `json:"args"`
+	Cwd                    string   `json:"cwd"`
+	LuaPath                string   `json:"luaPath"`
+	StopOnEntry            bool     `json:"stopOnEntry"`
+	NoDebug                bool     `json:"noDebug"` // set by the client for "Run Without Debugging"
 	// Extra module search paths, exported as LUA_PATH / LUA_CPATH with the
 	// interpreter defaults appended (the ";;" convention).
 	PackagePath  []string          `json:"packagePath"`
@@ -47,11 +49,12 @@ type Server struct {
 	debuggerScript string
 	defaultLuaPath string
 
-	rt          *Runtime
-	stopOnEntry bool
-	noDebug     bool
-	cwd         string
-	locale      string // normalized client locale from initialize
+	rt                     *Runtime
+	stopOnEntry            bool
+	noDebug                bool
+	breakOnCoroutineErrors bool
+	cwd                    string
+	locale                 string // normalized client locale from initialize
 
 	// Breakpoint ids per file, needed to update `verified` through breakpoint events.
 	// Guarded by bpMu: both the request loop and the event pump assign ids.
@@ -86,6 +89,12 @@ func (s *Server) Run() error {
 		}
 	}()
 	codec := dap.NewCodec()
+	if err := codec.RegisterRequest("lua/resumeCoroutine", func() dap.Message { return &resumeCoroutineRequest{} }, func() dap.Message { return &dap.Response{} }); err != nil {
+		return err
+	}
+	if err := codec.RegisterRequest("lua/input", func() dap.Message { return &inputRequest{} }, func() dap.Message { return &dap.Response{} }); err != nil {
+		return err
+	}
 	if err := codec.RegisterRequest("lua/snapshot", func() dap.Message { return &snapshotRequest{} }, func() dap.Message { return &snapshotResponse{} }); err != nil {
 		return err
 	}
@@ -119,6 +128,12 @@ func (s *Server) handle(msg dap.Message) bool {
 		s.onInitialize(req)
 	case *dap.LaunchRequest:
 		s.onLaunch(req)
+	case *dap.AttachRequest:
+		s.onAttach(req)
+	case *inputRequest:
+		s.onInput(req)
+	case *resumeCoroutineRequest:
+		s.onResumeCoroutine(req)
 	case *dap.SetBreakpointsRequest:
 		s.onSetBreakpoints(req)
 	case *dap.SetExceptionBreakpointsRequest:
@@ -227,6 +242,7 @@ func (s *Server) onLaunch(req *dap.LaunchRequest) {
 	}
 	s.rt.locale = s.locale
 	if err := s.rt.Start(LaunchOptions{
+		Interactive:    args.Interactive,
 		LuaPath:        luaPath,
 		DebuggerScript: s.debuggerScript,
 		Program:        program,
@@ -240,6 +256,7 @@ func (s *Server) onLaunch(req *dap.LaunchRequest) {
 		return
 	}
 	s.stopOnEntry = args.StopOnEntry
+	s.breakOnCoroutineErrors = args.BreakOnCoroutineErrors
 	s.noDebug = args.NoDebug
 	go s.pumpEvents(s.rt)
 	s.send(&dap.LaunchResponse{Response: s.newResponse(req.Request)})
@@ -282,7 +299,7 @@ func (s *Server) onConfigurationDone(req *dap.ConfigurationDoneRequest) {
 		s.sendError(&req.Request, 1002, s.t("dap.notLaunched"))
 		return
 	}
-	if err := s.rt.Resume("run", map[string]any{"stopOnEntry": s.stopOnEntry && !s.noDebug, "noDebug": s.noDebug, "cwd": s.cwd}); err != nil {
+	if err := s.rt.Resume("run", map[string]any{"stopOnEntry": s.stopOnEntry && !s.noDebug, "noDebug": s.noDebug, "cwd": s.cwd, "breakOnCoroutineErrors": s.breakOnCoroutineErrors}); err != nil {
 		s.sendError(&req.Request, 1002, err.Error())
 		return
 	}

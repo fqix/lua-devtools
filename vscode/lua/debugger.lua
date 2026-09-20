@@ -12,7 +12,10 @@
 -- An optional ABI-neutral C module polls stdin from hooks. Without it, commands
 -- are read only while paused (breakpoint, step, or before the script starts).
 
-local scriptDir = (arg and arg[0] or ""):match("^(.*)[/\\]") or "."
+local attachOptions = ...
+if type(attachOptions) ~= "table" then attachOptions = nil end
+local scriptDir = debug.getinfo(1, "S").source:sub(2):match("^(.*)[/\\]") or "."
+local detach
 local json = dofile(scriptDir .. "/json.lua")
 local snapshot = assert(loadfile(scriptDir .. "/snapshot.lua"))(json.encode)
 
@@ -47,15 +50,27 @@ local SELF_SOURCE = debug.getinfo(1, "S").source
 -- Protocol I/O
 -------------------------------------------------------------------------------
 
-local protocolPath = assert(os.getenv("LUA_DEVTOOLS_PROTOCOL"), "missing debugger protocol path")
-local protocol = assert(io.open(protocolPath, "ab"))
+local tcp
+local connect = os.getenv("LUA_DEVTOOLS_CONNECT")
+if attachOptions or (connect and connect ~= "") then
+  local opts = attachOptions or {connect=connect, token=os.getenv("LUA_DEVTOOLS_TOKEN")}
+  opts.encode, opts.decode = json.encode, json.decode
+  tcp = assert(loadfile(scriptDir .. "/transport.lua"))(opts)
+  pollStdin = tcp.poll
+end
+local protocol
 local stdin = io.stdin
--- Kernel readiness cannot see bytes prefetched into a FILE buffer.
-if not stdin:setvbuf("no") then pollStdin = nil end
-
+if not tcp then
+  protocol = assert(io.open(assert(os.getenv("LUA_DEVTOOLS_PROTOCOL"), "missing debugger protocol path"), "ab"))
+  if not stdin:setvbuf("no") then pollStdin = nil end
+end
 local function send(msg)
-  assert(protocol:write(json.encode(msg), "\n"))
-  assert(protocol:flush())
+  local text = json.encode(msg) .. "\n"
+  if tcp then
+    if not tcp.send(text) and detach then detach() end
+  else
+    assert(protocol:write(text)); assert(protocol:flush())
+  end
 end
 
 local function output(category, text)
@@ -64,7 +79,8 @@ end
 
 local function readMessage()
   while true do
-    local line = stdin:read("*l")
+    local line
+    if tcp then line = tcp.read() else line = stdin:read("*l") end
     if line == nil then
       return nil -- adapter closed stdin
     end
@@ -89,6 +105,7 @@ local function readCommand()
 end
 
 local adapterGone = false
+local detached = false
 
 -- Ask the adapter to canonicalize a path (absolute, symlinks resolved) so it
 -- matches breakpoint paths. Pure Lua has no realpath; the adapter answers on
@@ -179,6 +196,10 @@ local noDebug = false  -- "Run Without Debugging": never install the hook
 local cwd = nil        -- working directory sent by the adapter, for relative sources
 
 local hook    -- forward declaration; findAnchor locates it by identity
+local pause
+local exceptionThread
+local breakOnCoroutineErrors = false
+local restoreMainHook
 local onError -- xpcall message handler; the anchor while paused on an exception
 
 local function newRef(entry)
@@ -257,7 +278,7 @@ local function frameLocation(frameId)
     return currentThread(), assert(findAnchor(), "no active stack") + frameId - 1
   end
   local co = assert(threads[math.floor(frameId / FRAME_STRIDE)], "unknown coroutine")
-  assert(co ~= currentThread() and threadStatus(co) ~= "dead", "stale frame")
+  assert(co ~= currentThread() and (threadStatus(co) ~= "dead" or co == exceptionThread), "stale frame")
   return co, frameId % FRAME_STRIDE
 end
 
@@ -288,7 +309,7 @@ local function collectStack(threadId)
   if threadId then co = threads[threadId] end
   assert(co, "unknown coroutine")
   local active = co == currentThread()
-  if threadStatus(co) == "dead" then return {} end
+  if threadStatus(co) == "dead" and co ~= exceptionThread then return {} end
   local anchor = active and findAnchor() or 0
   if not anchor then return {} end
   local frames = {}
@@ -503,6 +524,8 @@ end
 -------------------------------------------------------------------------------
 
 local RESUME = {}
+local RESUME_THREAD = {}
+local resumeThread
 
 local function setBreakpoints(cmd)
   local file = assert(cmd.file, "setBreakpoints needs file")
@@ -547,7 +570,15 @@ handlers.setBreakpoints = setBreakpoints
 function handlers.run(cmd)
   noDebug = cmd.noDebug and true or false
   cwd = cmd.cwd
+  breakOnCoroutineErrors = cmd.breakOnCoroutineErrors == true
   return resume(cmd.stopOnEntry and "in" or nil)
+end
+
+function handlers.resumeThread(cmd)
+  local co = assert(threads[cmd.threadId], "unknown coroutine")
+  assert(co ~= currentThread() and threadStatus(co) == "suspended", "select a suspended coroutine")
+  resumeThread = {co=co, step=cmd.step}
+  return RESUME_THREAD
 end
 
 function handlers.continue()
@@ -569,7 +600,7 @@ end
 function handlers.threads()
   local result = {}
   for id, co in pairs(threads) do
-    if threadStatus(co) ~= "dead" then
+    if threadStatus(co) ~= "dead" or co == exceptionThread then
       result[#result + 1] = { id = id, name = id == 1 and "main" or ("coroutine " .. id .. " (" .. threadStatus(co) .. ")") }
     end
   end
@@ -637,9 +668,11 @@ end
 local function commandLoop(running)
   local processed = 0
   while true do
+    if detached then return end
     if running and #queuedCommands == 0 and not pollStdin() then return end
     local cmd = readCommand()
     if not cmd then
+      if attachOptions then detach(); return end
       os.exit(0, true)
     end
     local handler = handlers[cmd.cmd]
@@ -652,7 +685,7 @@ local function commandLoop(running)
       local ok, res = pcall(handler, cmd)
       if ok then
         result = res
-        if res ~= RESUME then
+        if res ~= RESUME and res ~= RESUME_THREAD then
           reply.body = res
         end
       else
@@ -663,18 +696,30 @@ local function commandLoop(running)
       send(reply)
     end
     if result == RESUME then return end
+    if result == RESUME_THREAD then
+      local requested = resumeThread
+      resumeThread = nil
+      varRefs = {}
+      step = requested.step and {mode="in"} or nil
+      inDebugger = false
+      local values = packValues(coroutine.resume(requested.co))
+      inDebugger, step = true, nil
+      varRefs = {}
+      if not values[1] then output("stderr", tostring(values[2]) .. "\n") end
+      send({event="stopped",threadId=registerThread(currentThread()),reason="pause",text="Coroutine yielded or finished"})
+    end
     processed = processed + 1
     if running and processed >= 32 then return end
   end
 end
 
-local function pause(reason, info, text)
+pause = function(reason, info, text, stoppedThread)
   inDebugger = true
   step = nil
   pauseRequested = false
   send({
     event = "stopped",
-    threadId = registerThread(currentThread()),
+    threadId = registerThread(stoppedThread or currentThread()),
     reason = reason,
     file = sourcePath(info.source),
     line = info.currentline,
@@ -734,6 +779,7 @@ end
 
 local pollTicks = 0
 function hook(event, line)
+  if detached then restoreMainHook(); return end
   if inDebugger then return end
   if pollStdin then
     pollTicks = pollTicks + 1
@@ -742,6 +788,7 @@ function hook(event, line)
       commandLoop(true)
     end
   end
+  if detached then return end
   if not pauseRequested and (event ~= "line" or (not step and next(breakpoints) == nil)) then return end
 
   local info = debug.getinfo(2, "Sl")
@@ -765,17 +812,93 @@ function hook(event, line)
   end
 end
 
+  function onError(msg)
+    -- The stack is still intact here. Disable the hook, then pause so the
+    -- user can inspect variables at the error site.
+    debug.sethook()
+    local tb = debug.traceback(tostring(msg), 2)
+    -- Drop xpcall and the debugger's own frames below it.
+    tb = tb:gsub("\n\t%[C%]: in function 'xpcall'.*$", "")
+    -- Pause at the user frame closest to the error.
+    local level = 2
+    while true do
+      local info = debug.getinfo(level, "Sl")
+      if not info then
+        break
+      end
+      if sourcePath(info.source) and info.source ~= SELF_SOURCE then
+        -- Without debugging, just report the traceback and exit.
+        if not noDebug then
+          pause("exception", info, tostring(msg))
+        end
+        break
+      end
+      level = level + 1
+    end
+    return tb
+  end
+
+
+local originalCreate, originalResume, originalWrap = coroutine.create, coroutine.resume, coroutine.wrap
+local originalHook, originalMask, originalCount = debug.gethook()
+local priorHooks = setmetatable({}, {__mode="k"})
+local originalJIT = jit and jit.status()
+restoreMainHook = function()
+  if type(mainThread) == "thread" then
+    debug.sethook(mainThread, originalHook, originalMask or "", originalCount or 0)
+  elseif currentThread() == mainThread then
+    debug.sethook(originalHook, originalMask or "", originalCount or 0)
+  end
+end
+local function installThreadHook(co)
+  if not priorHooks[co] then
+    local previous = {debug.gethook(co)}
+    if previous[1] == hook then
+      previous = priorHooks[currentThread()] or {originalHook, originalMask, originalCount}
+    end
+    priorHooks[co] = previous
+  end
+  debug.sethook(co, hook, "l", pollStdin and 1000 or 0)
+end
+detach = function()
+  if detached then return end
+  detached, adapterGone = true, true
+  step, pauseRequested, pollStdin = nil, false, nil
+  restoreMainHook()
+  for co, previous in pairs(priorHooks) do
+    pcall(debug.sethook, co, previous[1], previous[2] or "", previous[3] or 0)
+  end
+  coroutine.create, coroutine.resume, coroutine.wrap = originalCreate, originalResume, originalWrap
+  if originalJIT then jit.on() end
+  if tcp then tcp.close() end
+end
 local function installCoroutineHooks()
   local create = coroutine.create
   local resumeCoroutine = coroutine.resume
   coroutine.create = function(fn)
     local co = create(fn)
     registerThread(co)
-    debug.sethook(co, hook, "l", pollStdin and 1000 or 0)
+    installThreadHook(co)
     return co
   end
   coroutine.resume = function(co, ...)
+    registerThread(co)
+    if not detached and threadStatus(co) ~= "dead" then installThreadHook(co) end
     local result = packValues(resumeCoroutine(co, ...))
+    if not result[1] and breakOnCoroutineErrors and not detached and not inDebugger then
+      local level = 1
+      while true do
+        local info = debug.getinfo(co, level, "Sl")
+        if not info then break end
+        if info.source ~= SELF_SOURCE and info.source:sub(1,1) == "@" then
+          exceptionThread = co
+          pause("exception", info, tostring(result[2]), co)
+          exceptionThread = nil
+          break
+        end
+        level = level+1
+      end
+    end
     -- Stepping past yield or the end of a coroutine resumes in its caller.
     if step and step.thread == co then
       step = { mode = "in" }
@@ -804,7 +927,7 @@ end
 
 local function finish(exitCode)
   debug.sethook()
-  protocol:close()
+  if tcp then tcp.close() else protocol:close() end
   os.exit(exitCode, true)
 end
 
@@ -838,31 +961,6 @@ local function main()
   newArg[-1] = arg[-1]
   _G.arg = newArg
 
-  function onError(msg)
-    -- The stack is still intact here. Disable the hook, then pause so the
-    -- user can inspect variables at the error site.
-    debug.sethook()
-    local tb = debug.traceback(tostring(msg), 2)
-    -- Drop xpcall and the debugger's own frames below it.
-    tb = tb:gsub("\n\t%[C%]: in function 'xpcall'.*$", "")
-    -- Pause at the user frame closest to the error.
-    local level = 2
-    while true do
-      local info = debug.getinfo(level, "Sl")
-      if not info then
-        break
-      end
-      if sourcePath(info.source) and info.source ~= SELF_SOURCE then
-        -- Without debugging, just report the traceback and exit.
-        if not noDebug then
-          pause("exception", info, tostring(msg))
-        end
-        break
-      end
-      level = level + 1
-    end
-    return tb
-  end
 
   if not noDebug then
     -- LuaJIT machine-code loops do not reliably enter instruction hooks.
@@ -880,4 +978,22 @@ local function main()
   finish(0)
 end
 
+if attachOptions then
+  commandLoop()
+  if not detached and not noDebug then
+    if jit then jit.off(); jit.flush() end
+    installCoroutineHooks()
+    debug.sethook(hook, "l", pollStdin and 1000 or 0)
+  end
+  return {
+    stop = function() detach() end,
+    run = function(_, fn, ...)
+      local arguments = packValues(...)
+      local result = packValues(xpcall(function() return fn(unpackValues(arguments,1,arguments.n)) end, onError))
+      if not detached and not noDebug then debug.sethook(hook, "l", pollStdin and 1000 or 0) end
+      if not result[1] then error(result[2], 0) end
+      return unpackValues(result,2,result.n)
+    end,
+  }
+end
 main()

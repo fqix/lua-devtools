@@ -28,5 +28,16 @@
   "config.styluaPath": "StyLua executable path or command for Lua formatting. Empty uses stylua on PATH. Project stylua.toml settings are respected.",
   "command.upgradePackage": "Upgrade to Latest Version",
   "command.uninstallPackage": "Uninstall This Version",
-  "command.installPackageVersion": "Install Specific Version…"
+  "command.installPackageVersion": "Install Specific Version…",
+  "launch.interactive": "Keep stdin available to the program; use Send Program Input / Close Program Input. Requires LuaSocket for the separate debug connection.",
+  "launch.breakOnCoroutineErrors": "Pause on errors caught by coroutine.resume and inspect the failed coroutine before returning to its caller.",
+  "attach.host": "Host running the Lua debugger bootstrap.",
+  "attach.port": "TCP port passed to lua-devtools.listen.",
+  "attach.token": "Token matching the Lua listener configuration.",
+  "attach.label": "Lua: Attach to Host",
+  "attach.description": "Attach to a Lua or embedded host that called lua-devtools.listen.",
+  "command.sendInput": "Lua DevTools: Send Program Input…",
+  "command.closeInput": "Lua DevTools: Close Program Input",
+  "command.resumeCoroutine": "Lua DevTools: Resume Suspended Coroutine…",
+  "command.copyAttachSnippet": "Lua DevTools: Copy Attach Bootstrap"
 }

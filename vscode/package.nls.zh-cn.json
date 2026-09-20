@@ -28,5 +28,16 @@
   "config.styluaPath": "用于 Lua 格式化的 StyLua 可执行文件路径或命令。为空时从 PATH 查找 stylua，遵循项目 stylua.toml 配置。",
   "command.upgradePackage": "升级到最新版本",
   "command.uninstallPackage": "卸载此版本",
-  "command.installPackageVersion": "安装指定版本…"
+  "command.installPackageVersion": "安装指定版本…",
+  "launch.interactive": "为程序保留标准输入，使用“发送程序输入／关闭程序输入”。独立调试连接需要 LuaSocket。",
+  "launch.breakOnCoroutineErrors": "在 coroutine.resume 捕获错误后、返回调用者之前暂停并检查失败协程。",
+  "attach.host": "运行 Lua 调试引导代码的主机。",
+  "attach.port": "传给 lua-devtools.listen 的 TCP 端口。",
+  "attach.token": "与 Lua 监听器配置一致的令牌。",
+  "attach.label": "Lua：附加到宿主",
+  "attach.description": "附加到已调用 lua-devtools.listen 的 Lua 或嵌入式宿主。",
+  "command.sendInput": "Lua DevTools：发送程序输入…",
+  "command.closeInput": "Lua DevTools：关闭程序输入",
+  "command.resumeCoroutine": "Lua DevTools：恢复挂起协程…",
+  "command.copyAttachSnippet": "Lua DevTools：复制附加调试引导代码"
 }
