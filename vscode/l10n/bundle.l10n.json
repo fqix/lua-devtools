@@ -16,5 +16,15 @@
   "Enter an absolute executable path or a command on PATH.": "Enter an absolute executable path or a command on PATH.",
   "Pause Lua debugging and right-click a table in Variables.": "Pause Lua debugging and right-click a table in Variables.",
   "Invalid table snapshot response.": "Invalid table snapshot response.",
-  "Cannot view Lua table: {0}": "Cannot view Lua table: {0}"
+  "Cannot view Lua table: {0}": "Cannot view Lua table: {0}",
+  "Open a project folder to install Lua packages.": "Open a project folder to install Lua packages.",
+  "LuaRocks was not found. Install LuaRocks or configure luaDevtools.luarocksPath.": "LuaRocks was not found. Install LuaRocks or configure luaDevtools.luarocksPath.",
+  "Configure LuaRocks": "Configure LuaRocks",
+  "Install Lua Package": "Install Lua Package",
+  "Package for {0} in {1} (for example, luasocket)": "Package for {0} in {1} (for example, luasocket)",
+  "Enter a package name, such as luasocket or luaunit.": "Enter a package name, such as luasocket or luaunit.",
+  "Install {0} ({1})": "Install {0} ({1})",
+  "Installed {0} for {1}. New run and debug sessions will load it.": "Installed {0} for {1}. New run and debug sessions will load it.",
+  "Lua package installation failed. See the task terminal for details.": "Lua package installation failed. See the task terminal for details.",
+  "Cannot install Lua package: {0}": "Cannot install Lua package: {0}"
 }

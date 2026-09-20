@@ -18,5 +18,15 @@
   "Enter an absolute executable path or a command on PATH.": "输入可执行文件的绝对路径或 PATH 中的命令。",
   "Pause Lua debugging and right-click a table in Variables.": "请暂停 Lua 调试，并在变量面板中右键选择一个 table。",
   "Invalid table snapshot response.": "表快照响应无效。",
-  "Cannot view Lua table: {0}": "无法查看 Lua 表：{0}"
+  "Cannot view Lua table: {0}": "无法查看 Lua 表：{0}",
+  "Open a project folder to install Lua packages.": "请先打开项目文件夹，再安装 Lua 包。",
+  "LuaRocks was not found. Install LuaRocks or configure luaDevtools.luarocksPath.": "未找到 LuaRocks。请安装 LuaRocks 或配置 luaDevtools.luarocksPath。",
+  "Configure LuaRocks": "配置 LuaRocks",
+  "Install Lua Package": "安装 Lua 包",
+  "Package for {0} in {1} (for example, luasocket)": "为项目 {1} 的 {0} 安装包（例如 luasocket）",
+  "Enter a package name, such as luasocket or luaunit.": "请输入包名，例如 luasocket 或 luaunit。",
+  "Install {0} ({1})": "安装 {0}（{1}）",
+  "Installed {0} for {1}. New run and debug sessions will load it.": "已为 {1} 安装 {0}，新的运行和调试会话会自动加载。",
+  "Lua package installation failed. See the task terminal for details.": "Lua 包安装失败，请查看任务终端中的详细信息。",
+  "Cannot install Lua package: {0}": "无法安装 Lua 包：{0}"
 }

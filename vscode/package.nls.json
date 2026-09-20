@@ -22,5 +22,7 @@
   "command.refreshInterpreters": "Lua DevTools: Refresh Environments",
   "command.enterInterpreterPath": "Lua DevTools: Enter Interpreter Path…",
   "view.environments": "Lua Environments",
-  "view.environments.trust": "Trust this workspace to discover Lua interpreters.\n[Manage Workspace Trust](command:workbench.trust.manage)"
+  "view.environments.trust": "Trust this workspace to discover Lua interpreters.\n[Manage Workspace Trust](command:workbench.trust.manage)",
+  "command.installPackage": "Install Lua Package…",
+  "config.luarocksPath": "LuaRocks executable path or command. When empty, searches PATH for luarocks. Packages are installed into the project for the chosen interpreter."
 }

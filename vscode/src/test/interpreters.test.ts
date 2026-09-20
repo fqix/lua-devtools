@@ -44,3 +44,40 @@ test('discovers distinct PATH interpreters, deduplicates symlinks, validates ver
     await rm(root, { recursive: true, force: true });
   }
 });
+
+import { applyPackagePaths, installArguments, packageEnvironment, validPackageName } from '../projectPackages';
+
+test('project packages isolate interpreter identities and preserve explicit search paths', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'lua packages '));
+  try {
+    const executable = path.join(root, 'lua');
+    await writeFile(executable, '');
+    const lua = await packageEnvironment(root, { path: executable, version: 'Lua 5.4.9' });
+    const jit = await packageEnvironment(root, { path: executable, version: 'LuaJIT 2.1.0' });
+    const upgraded = await packageEnvironment(root, { path: executable, version: 'Lua 5.4.10' });
+    assert.equal(jit.version, '5.1');
+    assert.notEqual(lua.tree, jit.tree);
+    assert.notEqual(lua.tree, upgraded.tree);
+    assert.notEqual(lua.tree, (await packageEnvironment(path.join(root, 'other'), { path: executable, version: 'Lua 5.4.9' })).tree);
+    const config = { env: { LUA_PATH_5_4: 'existing/?.lua;;', LUA_CPATH_5_4: 'native/?.so;;', KEEP: 'value' }, packagePath: ['explicit/?.lua'], packageCPath: ['explicit/?.so'] };
+    await applyPackagePaths(config, lua);
+    assert.deepEqual(config.packagePath, ['explicit/?.lua'], 'no changes before package tree exists');
+    await mkdir(lua.tree, { recursive: true });
+    await applyPackagePaths(config, lua);
+    assert.equal(config.env.KEEP, 'value');
+    assert.ok(config.env.LUA_PATH_5_4.startsWith('explicit/?.lua;'));
+    assert.ok(config.env.LUA_PATH_5_4.includes(path.join(lua.tree, 'share', 'lua', '5.4', '?.lua')));
+    assert.ok(config.env.LUA_PATH_5_4.endsWith(';existing/?.lua;;'));
+    assert.ok(config.env.LUA_CPATH_5_4.startsWith('explicit/?.so;'));
+    assert.equal(config.packagePath, undefined);
+    const args = installArguments(lua, 'luasocket');
+    assert.ok(args.includes(lua.tree));
+    assert.ok(args.includes('LUA=' + lua.executable));
+    assert.ok(args.includes(lua.luaDir));
+    for (const invalid of ['--server=evil', 'x;echo', '../file.rockspec', 'x y', 'https://example.org/pkg']) {
+      assert.equal(validPackageName(invalid), false);
+      assert.throws(() => installArguments(lua, invalid));
+    }
+    assert.equal(validPackageName('owner/package-name'), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

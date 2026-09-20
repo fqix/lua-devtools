@@ -53,6 +53,8 @@ With a Lua file open, click the interpreter version in the status bar or run **L
 
 The **Lua DevTools** sidebar contains a **Lua Environments** tree. Click an interpreter to select it, expand it to see its executable path, use **+** to enter a path, or refresh to rescan. The current interpreter is marked; **Use automatic detection** restores the default lookup. This view lists existing interpreters; it does not install Lua or create virtual environments.
 
+Use the package icon beside an interpreter (or **Install Lua Package…** in its context menu) to install a LuaRocks package into the current project. Install LuaRocks first, or set `luaDevtools.luarocksPath`. Dependencies live under `.lua-devtools/rocks/`, separately for each interpreter, and are loaded automatically by new Run/Debug sessions, including launch configurations with `luaPath`. Add `.lua-devtools/` to the project’s `.gitignore`. Multi-root workspaces prompt for the destination project. Native modules may require a compiler and the interpreter’s development headers; failures appear in the task terminal. This does not change external terminal environments or add package-source navigation to the language server.
+
 | Setting | Description |
 |---|---|
 | `luaDevtools.luaPath` | Lua interpreter; when empty, `lua5.4`, Homebrew `lua@5.4` and `lua` are tried in order |

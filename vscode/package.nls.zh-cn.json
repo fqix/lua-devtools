@@ -22,5 +22,7 @@
   "command.refreshInterpreters": "Lua DevTools: 刷新环境",
   "command.enterInterpreterPath": "Lua DevTools: 输入解释器路径…",
   "view.environments": "Lua 环境",
-  "view.environments.trust": "信任此工作区后可发现 Lua 解释器。\n[管理工作区信任](command:workbench.trust.manage)"
+  "view.environments.trust": "信任此工作区后可发现 Lua 解释器。\n[管理工作区信任](command:workbench.trust.manage)",
+  "command.installPackage": "安装 Lua 包…",
+  "config.luarocksPath": "LuaRocks 可执行文件路径或命令；为空时从 PATH 查找 luarocks。包按所选解释器安装到项目独立目录。"
 }

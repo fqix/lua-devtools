@@ -53,6 +53,8 @@ Busted 支持 `describe`、`context`、`insulate`、`expose` 下的 `it`、`spec
 
 侧边栏 **Lua DevTools** 中提供 **Lua 环境** 树。点击解释器即可切换，展开可查看可执行文件路径；点击 **+** 手动输入路径，点击刷新重新扫描。当前解释器有选中标记，点击 **使用自动检测** 可恢复默认查找。此视图管理已有解释器，不安装 Lua 或创建虚拟环境。
 
+点击解释器旁的包图标，或在右键菜单选择 **安装 Lua 包…**，即可用 LuaRocks 将包安装到项目中。需先安装 LuaRocks，或设置 `luaDevtools.luarocksPath`。依赖存放在 `.lua-devtools/rocks/` 下，按解释器隔离；新的运行和调试会话会自动加载，包括显式指定 `luaPath` 的 launch 配置。建议将 `.lua-devtools/` 加入项目 `.gitignore`。多根工作区会提示选择目标项目。原生模块可能需要编译器和对应解释器的开发头文件，安装失败可查看任务终端。此功能不会修改外部终端环境，也不提供包源码的语言服务跳转。
+
 | 设置 | 说明 |
 |---|---|
 | `luaDevtools.luaPath` | Lua 解释器路径；为空时依次查找 `lua5.4`、Homebrew `lua@5.4`、`lua` |

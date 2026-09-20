@@ -3,6 +3,8 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import * as vscode from 'vscode';
+import { automaticInterpreter, inspectInterpreter } from '../interpreters';
+import { packageEnvironment } from '../projectPackages';
 import { InterpreterTreeProvider } from '../interpreterView';
 
 function until<T>(probe: () => T | undefined | false | null, timeout = 20000, what = 'condition'): Promise<T> {
@@ -89,7 +91,7 @@ suite('Lua DevTools end to end', function () {
 
   test('registers its commands', async () => {
     const commands = await vscode.commands.getCommands(true);
-    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter', 'luaDevtools.viewTableJSON', 'luaDevtools.refreshInterpreters', 'luaDevtools.enterInterpreterPath']) {
+    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter', 'luaDevtools.viewTableJSON', 'luaDevtools.refreshInterpreters', 'luaDevtools.enterInterpreterPath', 'luaDevtools.installPackage']) {
       assert.ok(commands.includes(name), `${name} is registered`);
     }
   });
@@ -127,6 +129,33 @@ suite('Lua DevTools end to end', function () {
       listener.dispose();
       provider.dispose();
       await config.update('luaPath', previous, vscode.ConfigurationTarget.Workspace);
+    }
+  });
+
+  test('run and debug automatically load project packages for the launch interpreter', async () => {
+    const executable = await automaticInterpreter();
+    assert.ok(executable);
+    const interpreter = await inspectInterpreter(executable);
+    assert.ok(interpreter);
+    const environment = await packageEnvironment(folder().uri.fsPath, interpreter);
+    const moduleDirectory = vscode.Uri.file(join(environment.tree, 'share', 'lua', environment.version));
+    const module = vscode.Uri.joinPath(moduleDirectory, 'lua_devtools_package_test.lua');
+    const program = fileUri('managed-package.lua');
+    await vscode.workspace.fs.createDirectory(moduleDirectory);
+    await vscode.workspace.fs.writeFile(module, Buffer.from('return {value=42}'));
+    await vscode.workspace.fs.writeFile(program, Buffer.from('assert(require("lua_devtools_package_test").value==42); print("PACKAGE_OK")'));
+    try {
+      for (const noDebug of [false, true]) {
+        const { recorder } = await startSession(() => vscode.debug.startDebugging(folder(), {
+          type: 'lua', request: 'launch', name: 'Project package test', program: program.fsPath, luaPath: executable,
+        }, { noDebug }));
+        await until(() => recorder.event('terminated'), 30000, 'package test termination');
+        assert.equal(recorder.event('exited').body.exitCode, 0);
+        assert.match(recorder.outputs(), /PACKAGE_OK/);
+      }
+    } finally {
+      await vscode.workspace.fs.delete(module);
+      await vscode.workspace.fs.delete(program);
     }
   });
 

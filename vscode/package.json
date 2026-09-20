@@ -56,6 +56,11 @@
         "command": "luaDevtools.enterInterpreterPath",
         "title": "%command.enterInterpreterPath%",
         "icon": "$(add)"
+      },
+      {
+        "command": "luaDevtools.installPackage",
+        "title": "%command.installPackage%",
+        "icon": "$(package)"
       }
     ],
     "breakpoints": [
@@ -168,6 +173,12 @@
           ],
           "default": "off",
           "description": "%config.trace.server%"
+        },
+        "luaDevtools.luarocksPath": {
+          "type": "string",
+          "default": "",
+          "description": "%config.luarocksPath%",
+          "scope": "window"
         }
       }
     },
@@ -215,6 +226,13 @@
           "command": "luaDevtools.refreshInterpreters",
           "when": "view == luaDevtools.environments",
           "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "luaDevtools.installPackage",
+          "when": "view == luaDevtools.environments && viewItem == luaInterpreter",
+          "group": "inline@1"
         }
       ]
     },
