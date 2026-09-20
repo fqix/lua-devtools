@@ -16,6 +16,7 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 - Run / Debug buttons in the editor title; F5 on the active `.lua` file works without a launch.json.
 - Coroutine breakpoints and stepping for `coroutine.create` / `coroutine.wrap`, with a coroutine list, suspended stacks, locals/upvalues, and evaluation or assignment in the selected frame.
 - Member completion through table aliases, table-valued `__index`, simple functions returning table literals, and top-level exports from local `require` modules.
+- F12 / Ctrl/Cmd-click follows statically resolved local `require` exports to function implementations, including aliases, methods, directory modules and unsaved sources.
 - Lua 5.1–5.5 and LuaJIT 2.1 debugging; in trusted workspaces, syntax checking and standard-library completion follow Lua 5.1–5.5 and LuaJIT 2.1 interpreter versions.
 - Lua 5.5 declarations: definition navigation and outline for `global` / `global function`, lexical shadowing, prefixed attributes, and named vararg parameters (`...args`). `global *` and `global <const> *` preserve implicit global lookup without creating fake outline symbols.
 - Program stdout/stderr are separate from the debugger protocol, including direct `io.stdout:write` and output without newlines.

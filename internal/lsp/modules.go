@@ -28,10 +28,10 @@ func withinDirectory(root, path string) bool {
 	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) && !filepath.IsAbs(relative)
 }
 
-// moduleResolver uses only the workspace's ?.lua and ?/init.lua conventions.
+// moduleResolver uses ?.lua and ?/init.lua under the workspace and source ancestors.
 // It never executes require, package loaders, or project code. The caller holds
 // s.mu, allowing unsaved open documents to override disk content consistently.
-func (s *Server) moduleResolver(uri string) func(string) []analysis.Member {
+func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []analysis.Member {
 	path := fileURIPath(uri)
 	if path == "" {
 		return nil
@@ -46,6 +46,10 @@ func (s *Server) moduleResolver(uri string) func(string) []analysis.Member {
 	canonicalRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return nil
+	}
+	roots := []string{root}
+	for dir := filepath.Dir(path); dir != root && withinDirectory(root, dir); dir = filepath.Dir(dir) {
+		roots = append(roots, dir)
 	}
 	cache := map[string][]analysis.Member{}
 	depth := 0
@@ -67,8 +71,12 @@ func (s *Server) moduleResolver(uri string) func(string) []analysis.Member {
 		cache[name] = nil // Mark before recursion, so cycles terminate.
 		depth++
 		defer func() { depth-- }()
-		stem := filepath.Join(append([]string{root}, parts...)...)
-		for _, candidate := range []string{stem + ".lua", filepath.Join(stem, "init.lua")} {
+		candidates := []string{}
+		for _, base := range roots {
+			stem := filepath.Join(append([]string{base}, parts...)...)
+			candidates = append(candidates, stem+".lua", filepath.Join(stem, "init.lua"))
+		}
+		for _, candidate := range candidates {
 			var text []byte
 			for uri, doc := range s.docs {
 				if fileURIPath(uri) == candidate {
@@ -102,7 +110,19 @@ func (s *Server) moduleResolver(uri string) func(string) []analysis.Member {
 			remaining -= len(text)
 			module := analysis.Parse(text)
 			module.ModuleMembers = resolve
-			members := module.ExportedMembers()
+			var members []analysis.Member
+			if len(definitions) > 0 && definitions[0] {
+				members = module.ExportedDefinitions()
+				for i := range members {
+					if def := members[i].Definition; def != nil && def.URI == "" {
+						copy := *def
+						copy.URI = pathFileURI(candidate)
+						members[i].Definition = &copy
+					}
+				}
+			} else {
+				members = module.ExportedMembers()
+			}
 			module.Close()
 			cache[name] = members
 			return members
@@ -110,4 +130,12 @@ func (s *Server) moduleResolver(uri string) func(string) []analysis.Member {
 		return nil
 	}
 	return resolve
+}
+
+func pathFileURI(path string) string {
+	path = filepath.ToSlash(path)
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
 }

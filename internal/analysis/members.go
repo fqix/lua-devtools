@@ -9,15 +9,24 @@ import (
 
 // Member is a statically named field in a table or a function declaration.
 type Member struct {
-	Name     string
-	Function bool
+	Name       string
+	Function   bool
+	Definition *Definition
+}
+
+// Definition is a source location independent of the lifetime of a parsed tree.
+// URI is empty for the current file and filled by the module resolver.
+type Definition struct {
+	URI        string
+	Start, End Position
 }
 
 type memberValue struct {
-	function bool
-	fields   map[string]*memberValue
-	returns  *tree_sitter.Node
-	index    *memberValue
+	function   bool
+	definition *Definition
+	fields     map[string]*memberValue
+	returns    *tree_sitter.Node
+	index      *memberValue
 }
 
 type memberWrite struct {
@@ -168,6 +177,17 @@ func (f *File) inferMemberValue(n *tree_sitter.Node, values map[*Symbol]*memberV
 		return f.inferMemberValue(n.NamedChild(0), values, depth+1)
 	case "function_definition", "function_declaration":
 		value.function = true
+		target := n.ChildByFieldName("name")
+		if target == nil {
+			target = n
+		}
+		if field := target.ChildByFieldName("field"); field != nil {
+			target = field
+		}
+		if method := target.ChildByFieldName("method"); method != nil {
+			target = method
+		}
+		value.definition = &Definition{Start: f.PositionOf(int(target.StartByte())), End: f.PositionOf(int(target.EndByte()))}
 		// A single direct return is deterministic; conditional and multiple returns
 		// require control-flow analysis and intentionally remain unknown.
 		body := n.ChildByFieldName("body")
@@ -198,7 +218,10 @@ func (f *File) inferMemberValue(n *tree_sitter.Node, values map[*Symbol]*memberV
 				text := arg.Utf8Text(f.Text)
 				if len(text) >= 2 && (text[0] == '\'' || text[0] == '"') {
 					for _, member := range f.ModuleMembers(text[1 : len(text)-1]) {
-						value.fields[member.Name] = &memberValue{function: member.Function, fields: map[string]*memberValue{}}
+						value.fields[member.Name] = &memberValue{
+							function: member.Function, definition: member.Definition,
+							fields: map[string]*memberValue{},
+						}
 					}
 				}
 			}
@@ -360,6 +383,15 @@ func (f *File) memberState(offset int) map[*Symbol]*memberValue {
 // ExportedMembers returns the top-level fields of a module's direct return.
 // Conditional returns and runtime-dependent loading remain unknown.
 func (f *File) ExportedMembers() []Member {
+	return f.exportedMembers(false)
+}
+
+// ExportedDefinitions includes implementation locations for exported functions.
+func (f *File) ExportedDefinitions() []Member {
+	return f.exportedMembers(true)
+}
+
+func (f *File) exportedMembers(definitions bool) []Member {
 	root := f.tree.RootNode()
 	for i := uint(0); i < root.NamedChildCount(); i++ {
 		node := root.NamedChild(i)
@@ -375,7 +407,11 @@ func (f *File) ExportedMembers() []Member {
 		shape.members(fields, map[*memberValue]bool{})
 		members := []Member{}
 		for name, value := range fields {
-			members = append(members, Member{Name: name, Function: value.function})
+			member := Member{Name: name, Function: value.function}
+			if definitions {
+				member.Definition = value.definition
+			}
+			members = append(members, member)
 		}
 		sort.Slice(members, func(i, j int) bool { return members[i].Name < members[j].Name })
 		return members
@@ -395,4 +431,37 @@ func (f *File) InStringOrComment(offset int) bool {
 		}
 	}
 	return false
+}
+
+// ImplementationAt follows a function value through static member writes and aliases.
+func (f *File) ImplementationAt(offset int) *Definition {
+	identifierByte := func(c byte) bool {
+		return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+	}
+	if offset > 0 && offset <= len(f.Text) && identifierByte(f.Text[offset-1]) &&
+		(offset == len(f.Text) || !identifierByte(f.Text[offset])) {
+		offset--
+	}
+	if offset < 0 || offset >= len(f.Text) {
+		return nil
+	}
+	n := f.tree.RootNode().NamedDescendantForByteRange(uint(offset), uint(offset))
+	if n == nil {
+		return nil
+	}
+	if parent := n.Parent(); parent != nil {
+		for _, field := range []string{"field", "method"} {
+			key := parent.ChildByFieldName(field)
+			if key != nil && int(key.StartByte()) <= offset && offset < int(key.EndByte()) {
+				n = parent
+				break
+			}
+		}
+	}
+	switch n.Kind() {
+	case "identifier", "dot_index_expression", "method_index_expression", "bracket_index_expression":
+	default:
+		return nil
+	}
+	return f.inferMemberValue(n, f.memberState(offset), 0).definition
 }

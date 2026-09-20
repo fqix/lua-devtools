@@ -16,6 +16,7 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 - 编辑器右上角 Run / Debug 按钮；无 launch.json 时对当前 `.lua` 文件直接 F5。
 - 支持 `coroutine.create` / `coroutine.wrap` 中的断点和单步；提供协程列表，可查看挂起协程的调用栈、局部变量和 upvalue，并在选中栈帧中求值或赋值。
 - 成员补全支持表别名、表形式的 `__index`、简单函数返回的表字面量，以及本地 `require` 模块的顶层导出。
+- F12 / Ctrl/⌘ 点击可跳到本地 `require` 导出函数的实现，支持可静态解析的别名、方法、目录模块和未保存源码。
 - 支持 Lua 5.1–5.5 和 LuaJIT 2.1 调试；在受信任的工作区中，语法检查和标准库补全跟随 Lua 5.1–5.5 和 LuaJIT 2.1 解释器版本。
 - Lua 5.5 声明：支持 `global` / `global function` 的跳转和大纲、词法遮蔽、前置属性及具名可变参数（`...args`）；`global *` / `global <const> *` 保留隐式全局查找，不生成虚假的大纲符号。
 - 程序 stdout/stderr 与调试协议分离，支持直接 `io.stdout:write` 及不带换行的输出。

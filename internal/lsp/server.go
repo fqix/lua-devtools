@@ -268,6 +268,15 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		return nil, nil
 	}
 	f := doc.file
+	f.ModuleMembers = s.moduleResolver(params.TextDocument.URI, true)
+	defer func() { f.ModuleMembers = nil }()
+	if def := f.ImplementationAt(f.OffsetOf(fromPosition(params.Position))); def != nil {
+		uri := def.URI
+		if uri == "" {
+			uri = doc.uri
+		}
+		return protocol.Location{URI: uri, Range: protocol.Range{Start: toPosition(def.Start), End: toPosition(def.End)}}, nil
+	}
 	sym, _ := f.SymbolAt(f.OffsetOf(fromPosition(params.Position)))
 	if sym == nil {
 		return nil, nil
