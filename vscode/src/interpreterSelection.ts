@@ -12,14 +12,14 @@ export function registerInterpreterSelection(context: vscode.ExtensionContext): 
     const current = ++revision;
     if (vscode.window.activeTextEditor?.document.languageId !== 'lua') { status.hide(); return; }
     const configured = vscode.workspace.getConfiguration('luaDevtools').get<string>('luaPath') ?? '';
-    status.text = `$(terminal) ${configured ? path.basename(configured) : vscode.l10n.t('Select Lua Interpreter')}`;
+    status.text = `$(lua-devtools-logo) ${configured ? path.basename(configured) : vscode.l10n.t('Select Lua Interpreter')}`;
     status.tooltip = configured || vscode.l10n.t('Select Lua Interpreter');
     status.show();
     if (!vscode.workspace.isTrusted) return;
     const file = configured || await automaticInterpreter();
     const interpreter = file ? await inspectInterpreter(file) : undefined;
     if (current !== revision) return;
-    status.text = `$(terminal) ${interpreter?.version ?? vscode.l10n.t('Select Lua Interpreter')}`;
+    status.text = `$(lua-devtools-logo) ${interpreter?.version ?? vscode.l10n.t('Select Lua Interpreter')}`;
     status.tooltip = interpreter?.path ?? (configured ? vscode.l10n.t('Lua interpreter unavailable: {0}', configured) : vscode.l10n.t('No Lua interpreter found.'));
   };
   registerInterpreterView(context, refresh);

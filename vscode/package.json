@@ -28,6 +28,15 @@
   "main": "./dist/extension.js",
   "l10n": "./l10n",
   "contributes": {
+    "icons": {
+      "lua-devtools-logo": {
+        "description": "Lua DevTools project logo",
+        "default": {
+          "fontPath": "./media/lua-devtools.woff",
+          "fontCharacter": "\\E001"
+        }
+      }
+    },
     "commands": [
       {
         "command": "luaDevtools.run",

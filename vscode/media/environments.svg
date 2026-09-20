@@ -1,4 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-  <rect x="3" y="4" width="18" height="15" rx="2"/>
-  <path d="m7 8 4 3-4 3m6 0h4"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 256 256">
+  <!-- Monochrome project logo; also the source for lua-devtools.woff. -->
+  <path fill="#fff" d="M235 128 A107 107 0 1 1 21 128 A107 107 0 1 1 235 128 Z
+    M229 128 A101 101 0 1 0 27 128 A101 101 0 1 0 229 128 Z
+    M204 128 A76 76 0 1 1 52 128 A76 76 0 1 1 204 128 Z
+    M184 93 A21 21 0 1 0 142 93 A21 21 0 1 0 184 93 Z
+    M114 112 A14 14 0 1 0 86 112 A14 14 0 1 0 114 112 Z
+    M104 150 V162 H137 L130 169 L138 177 L159 156 L138 135 L130 143 L137 150 Z
+    M225 55 A15 15 0 1 1 195 55 A15 15 0 1 1 225 55 Z"/>
 </svg>
