@@ -2,7 +2,8 @@ import * as path from 'node:path';
 import { realpath } from 'node:fs/promises';
 import * as vscode from 'vscode';
 import { probeLibraries, scanModules } from './libraries';
-import { packageEnvironment } from './projectPackages';
+import { installedPackages, packageEnvironment } from './projectPackages';
+import type { PackageTarget } from './packageManagement';
 import type { Interpreter } from './interpreters';
 import { automaticInterpreter, discoverInterpreters, resolveInterpreter } from './interpreters';
 
@@ -10,6 +11,7 @@ class EnvironmentItem extends vscode.TreeItem {
   loadChildren?: () => Promise<EnvironmentItem[]>;
   children?: Promise<EnvironmentItem[]>;
   active = false;
+  packageTarget?: PackageTarget;
   constructor(label: string, readonly executable?: string) {
     super(label, executable ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None);
   }
@@ -101,8 +103,28 @@ export class InterpreterTreeProvider implements vscode.TreeDataProvider<Environm
         const env = await packageEnvironment(root.cwd, interpreter);
         const lua = [path.join(env.tree, 'share', 'lua', env.version, '?.lua'), path.join(env.tree, 'share', 'lua', env.version, '?', 'init.lua')].join(';');
         const native = path.join(env.tree, 'lib', 'lua', env.version, process.platform === 'win32' ? '?.dll' : '?.so');
+        const packages = group(vscode.l10n.t('Project packages'), async () => {
+          const rocks = await resolveInterpreter(vscode.workspace.getConfiguration('luaDevtools').get<string>('luarocksPath') || 'luarocks');
+          if (!rocks) return [new EnvironmentItem(vscode.l10n.t('Configure LuaRocks to list installed packages.'))];
+          const installed = await installedPackages(rocks, env, root.cwd);
+          if (!installed.length) return [new EnvironmentItem(vscode.l10n.t('No installed packages.'))];
+          return installed.map(pkg => {
+            const row = new EnvironmentItem(pkg.name);
+            row.id = `${env.tree}:${pkg.name}@${pkg.version}`;
+            row.description = pkg.version;
+            row.tooltip = `${pkg.name} ${pkg.version}\n${env.tree}`;
+            row.iconPath = new vscode.ThemeIcon('package');
+            row.contextValue = 'luaInstalledPackage';
+            row.packageTarget = { executable: interpreter.path, project: root.cwd, ...pkg };
+            return row;
+          });
+        });
+        packages.iconPath = new vscode.ThemeIcon('package');
+        packages.contextValue = 'luaPackageEnvironment';
+        packages.packageTarget = { executable: interpreter.path, project: root.cwd };
         return [
-          group(vscode.l10n.t('Project packages'), () => modules(lua, native, root.cwd)),
+          packages,
+          group(vscode.l10n.t('Project modules'), () => modules(lua, native, root.cwd)),
           group(vscode.l10n.t('Interpreter search paths'), () => modules(paths.luaPath, paths.cPath, root.cwd)),
         ];
       }));
@@ -162,7 +184,7 @@ export function registerInterpreterView(context: vscode.ExtensionContext, refres
   context.subscriptions.push(provider, view,
     vscode.commands.registerCommand('luaDevtools.refreshInterpreters', () => { provider.refresh(); return refreshStatus(); }),
     vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('luaDevtools.luaPath')) {
+      if (event.affectsConfiguration('luaDevtools.luaPath') || event.affectsConfiguration('luaDevtools.luarocksPath')) {
         provider.refresh();
         if (view.visible) void provider.getChildren().then(rows => {
           const selected = rows.find(row => row.active);

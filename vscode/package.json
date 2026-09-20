@@ -70,6 +70,21 @@
         "command": "luaDevtools.installPackage",
         "title": "%command.installPackage%",
         "icon": "$(package)"
+      },
+      {
+        "command": "luaDevtools.upgradePackage",
+        "title": "%command.upgradePackage%",
+        "icon": "$(arrow-up)"
+      },
+      {
+        "command": "luaDevtools.uninstallPackage",
+        "title": "%command.uninstallPackage%",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "luaDevtools.installPackageVersion",
+        "title": "%command.installPackageVersion%",
+        "icon": "$(versions)"
       }
     ],
     "breakpoints": [
@@ -222,6 +237,18 @@
         {
           "command": "luaDevtools.viewTableJSON",
           "when": "false"
+        },
+        {
+          "command": "luaDevtools.upgradePackage",
+          "when": "false"
+        },
+        {
+          "command": "luaDevtools.uninstallPackage",
+          "when": "false"
+        },
+        {
+          "command": "luaDevtools.installPackageVersion",
+          "when": "false"
         }
       ],
       "debug/variables/context": [
@@ -246,8 +273,23 @@
       "view/item/context": [
         {
           "command": "luaDevtools.installPackage",
-          "when": "view == luaDevtools.environments && viewItem == luaInterpreter",
+          "when": "view == luaDevtools.environments && (viewItem == luaInterpreter || viewItem == luaPackageEnvironment)",
           "group": "inline@1"
+        },
+        {
+          "command": "luaDevtools.upgradePackage",
+          "when": "view == luaDevtools.environments && viewItem == luaInstalledPackage",
+          "group": "inline@1"
+        },
+        {
+          "command": "luaDevtools.uninstallPackage",
+          "when": "view == luaDevtools.environments && viewItem == luaInstalledPackage",
+          "group": "package@3"
+        },
+        {
+          "command": "luaDevtools.installPackageVersion",
+          "when": "view == luaDevtools.environments && viewItem == luaInstalledPackage",
+          "group": "package@2"
         }
       ]
     },
