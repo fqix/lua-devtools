@@ -55,19 +55,36 @@ suite('Lua DevTools end to end', function () {
   this.timeout(120000);
   const folder = () => vscode.workspace.workspaceFolders![0];
   const fileUri = (name: string) => vscode.Uri.file(join(folder().uri.fsPath, name));
-  let recorder: DapRecorder;
+  // One recorder per debug session, keyed by session id, so a test never reads
+  // the messages of the previous test's session.
+  const recorders = new Map<string, DapRecorder>();
 
   suiteSetup(async () => {
     const extension = vscode.extensions.getExtension('fqix.lua-devtools');
     assert.ok(extension, 'extension is installed');
     await extension.activate();
     vscode.debug.registerDebugAdapterTrackerFactory('lua', {
-      createDebugAdapterTracker: () => {
-        recorder = new DapRecorder();
+      createDebugAdapterTracker: (session) => {
+        const recorder = new DapRecorder();
+        recorders.set(session.id, recorder);
         return recorder;
       },
     });
   });
+
+  /** Runs `start` and returns the session it created together with its recorder. */
+  async function startSession(start: () => Thenable<unknown>): Promise<{ session: vscode.DebugSession; recorder: DapRecorder }> {
+    const started = new Promise<vscode.DebugSession>((resolve) => {
+      const listener = vscode.debug.onDidStartDebugSession((session) => {
+        listener.dispose();
+        resolve(session);
+      });
+    });
+    await start();
+    const session = await started;
+    const recorder = await until(() => recorders.get(session.id), 10000, 'tracker for session');
+    return { session, recorder };
+  }
 
   test('registers its commands', async () => {
     const commands = await vscode.commands.getCommands(true);
@@ -154,14 +171,9 @@ suite('Lua DevTools end to end', function () {
       const uri = fileUri('hello.lua');
       vscode.debug.addBreakpoints([new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(1, 0)))]);
 
-      const started = await vscode.debug.startDebugging(folder(), {
-        type: 'lua',
-        request: 'launch',
-        name: 'e2e',
-        program: uri.fsPath,
-      });
-      assert.ok(started, 'debug session started');
-      const session = await until(() => vscode.debug.activeDebugSession, 20000, 'active session');
+      const { session, recorder } = await startSession(() =>
+        vscode.debug.startDebugging(folder(), { type: 'lua', request: 'launch', name: 'e2e', program: uri.fsPath }),
+      );
 
       const stopped = await until(() => recorder.event('stopped'), 30000, 'stopped event');
       assert.equal(stopped.body.reason, 'breakpoint');
@@ -188,16 +200,17 @@ suite('Lua DevTools end to end', function () {
     test('runs without debugging', async () => {
       const uri = fileUri('hello.lua');
       vscode.debug.addBreakpoints([new vscode.SourceBreakpoint(new vscode.Location(uri, new vscode.Position(1, 0)))]);
-      await vscode.commands.executeCommand('luaDevtools.run', uri);
-      await until(() => recorder?.event('terminated'), 30000, 'terminated event');
+      const { recorder } = await startSession(() => vscode.commands.executeCommand('luaDevtools.run', uri));
+      await until(() => recorder.event('terminated'), 30000, 'terminated event');
       assert.equal(recorder.event('stopped'), undefined, 'breakpoints are ignored without debugging');
       assert.match(recorder.outputs(), /total:\t30/);
     });
 
     test('pauses on a runtime error', async () => {
       const uri = fileUri('error.lua');
-      await vscode.debug.startDebugging(folder(), { type: 'lua', request: 'launch', name: 'e2e', program: uri.fsPath });
-      const session = await until(() => vscode.debug.activeDebugSession, 20000, 'active session');
+      const { session, recorder } = await startSession(() =>
+        vscode.debug.startDebugging(folder(), { type: 'lua', request: 'launch', name: 'e2e', program: uri.fsPath }),
+      );
       const stopped = await until(() => recorder.event('stopped'), 30000, 'stopped event');
       assert.equal(stopped.body.reason, 'exception');
       assert.match(stopped.body.text, /division by zero/);
