@@ -27,7 +27,11 @@ copyFileSync(join(ROOT, 'README.md'), join(EXT, 'README.md'));
 for (const target of targets) {
   const source = join(EXT, 'bin', target);
   const helper = `lua-devtools-native.${target.startsWith('win32-') ? 'dll' : 'so'}`;
-  if (!existsSync(join(source, helper))) run('node', [join(ROOT, 'scripts', 'build-go.mjs'), '--target', target], { cwd: ROOT });
+  const exe = target.startsWith('win32-') ? '.exe' : '';
+  const required = [helper, `lua-dap${exe}`, `lua-lsp${exe}`];
+  if (required.some((name) => !existsSync(join(source, name)))) {
+    run('node', [join(ROOT, 'scripts', 'build-go.mjs'), '--target', target], { cwd: ROOT });
+  }
   // Do not accidentally include a previously staged helper for a different OS.
   for (const suffix of ['so', 'dll']) rmSync(join(EXT, 'bin', `lua-devtools-native.${suffix}`), { force: true });
   const staged = [];
