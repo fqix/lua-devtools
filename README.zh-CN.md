@@ -61,7 +61,7 @@ launch 配置（`type: "lua"`）：
 
 ## 开发
 
-需要 Node.js 22、`go.mod` 指定版本的 Go 和 C 编译器（tree-sitter 通过 cgo 编译）、Lua 5.2–5.5。
+需要 Node.js 24 LTS、`go.mod` 指定版本的 Go 和 C 编译器（tree-sitter 通过 cgo 编译）、Lua 5.2–5.5。
 
 ```sh
 npm ci

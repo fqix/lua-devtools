@@ -61,7 +61,7 @@ Launch configuration (`type: "lua"`):
 
 ## Development
 
-Requirements: Node.js 22, the Go version in `go.mod` with a C compiler (tree-sitter is built through cgo), and Lua 5.2–5.5.
+Requirements: Node.js 24 LTS, the Go version in `go.mod` with a C compiler (tree-sitter is built through cgo), and Lua 5.2–5.5.
 
 ```sh
 npm ci

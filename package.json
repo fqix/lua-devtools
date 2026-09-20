@@ -2,7 +2,7 @@
   "name": "lua-devtools-workspace",
   "private": true,
   "engines": {
-    "node": ">=22 <23"
+    "node": ">=24 <25"
   },
   "workspaces": [
     "vscode"
