@@ -47,6 +47,8 @@ func TestInterpreterLanguageVersion(t *testing.T) {
 		{`return 3 & 1`, runtime.globals["jit"] || (runtime.version != "Lua 5.1" && runtime.version != "Lua 5.2")},
 		{`local x <const> = 1`, (runtime.version == "Lua 5.4" || runtime.version == "Lua 5.5")},
 		{`global x; x=1`, runtime.version == "Lua 5.5"},
+		{`global <const> a,b=1,2; global function f(...args) local <const> value=args.n+a; return value end`, runtime.version == "Lua 5.5"},
+		{`global <const> *; local <const> value=math.pi`, runtime.version == "Lua 5.5"},
 		{"#!/usr/bin/env lua\nlocal x = 1", true},
 	} {
 		t.Run(tt.source, func(t *testing.T) {

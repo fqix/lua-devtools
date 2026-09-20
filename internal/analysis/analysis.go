@@ -23,7 +23,7 @@ const (
 	KindLocal SymbolKind = iota
 	KindParameter
 	KindFunction // local or global function declared with `function name(...)`
-	KindGlobal   // first assignment to an undeclared name
+	KindGlobal   // explicit global declaration or first assignment to an undeclared name
 	KindField    // `function M.f()` / `function M:f()`; only for document symbols
 )
 
@@ -58,6 +58,8 @@ type Symbol struct {
 	Detail string
 	// Global marks names that live in _G (assigned globals and global functions).
 	Global bool
+	// ExplicitGlobal is a Lua 5.5 global declaration with lexical visibility.
+	ExplicitGlobal bool
 	// Scope is where the symbol is declared; Inner is a function's own scope.
 	Scope *Scope
 	Inner *Scope
@@ -73,12 +75,35 @@ const (
 
 // Scope is a lexical scope: the chunk, a block, or a function (parameters + body).
 type Scope struct {
-	Kind       ScopeKind
-	Parent     *Scope
-	Start, End int
-	Symbols    []*Symbol
-	Children   []*Scope
-	Owner      *Symbol // the function symbol that owns a ScopeFunction, if named
+	Kind               ScopeKind
+	Parent             *Scope
+	Start, End         int
+	Symbols            []*Symbol
+	Children           []*Scope
+	Owner              *Symbol // the function symbol that owns a ScopeFunction, if named
+	globalDeclarations []globalDeclaration
+}
+
+type globalDeclaration struct {
+	at       int
+	wildcard bool
+}
+
+// allowsImplicitGlobals distinguishes the chunk's implicit global-by-default
+// mode from an explicit global * declaration, which survives named declarations.
+func (s *Scope) allowsImplicitGlobals(at int) bool {
+	declared := false
+	for current := s; current != nil; current = current.Parent {
+		for _, declaration := range current.globalDeclarations {
+			if declaration.at <= at {
+				if declaration.wildcard {
+					return true
+				}
+				declared = true
+			}
+		}
+	}
+	return !declared
 }
 
 // Reference is one use of a name, resolved to a symbol when possible.
@@ -136,7 +161,7 @@ func Parse(text []byte) *File {
 	w.walk(root, f.Root)
 	// Globals may be assigned after their first use; bind those late.
 	for i := range f.References {
-		if f.References[i].Symbol == nil {
+		if f.References[i].Symbol == nil && f.References[i].Scope.allowsImplicitGlobals(f.References[i].Start) {
 			f.References[i].Symbol = f.Globals[f.References[i].Name]
 		}
 	}
@@ -274,6 +299,9 @@ func (w *walker) walk(n *tree_sitter.Node, scope *Scope) {
 		w.declareParameters(n, fn)
 		w.walkField(n, "body", fn)
 
+	case "implicit_variable_declaration":
+		scope.globalDeclarations = append(scope.globalDeclarations, globalDeclaration{at: int(n.EndByte()), wildcard: true})
+
 	case "variable_declaration":
 		w.variableDeclaration(n, scope)
 
@@ -346,7 +374,14 @@ func (w *walker) parameterNames(fn *tree_sitter.Node) string {
 	var names []string
 	cursor := params.Walk()
 	for _, p := range params.NamedChildren(cursor) {
-		names = append(names, p.Utf8Text(w.file.Text))
+		if p.Kind() == "comment" {
+			continue
+		}
+		if p.Kind() == "identifier" && len(names) > 0 && names[len(names)-1] == "..." {
+			names[len(names)-1] += p.Utf8Text(w.file.Text)
+		} else {
+			names = append(names, p.Utf8Text(w.file.Text))
+		}
 	}
 	cursor.Close()
 	return strings.Join(names, ", ")
@@ -358,11 +393,18 @@ func (w *walker) functionDeclaration(n *tree_sitter.Node, scope *Scope) {
 	// `local function f` is a function_declaration attached to its parent through
 	// the `local_declaration` field; there is no wrapping variable_declaration node.
 	isLocal := fieldNameOf(n) == "local_declaration"
+	isGlobal := fieldNameOf(n) == "global_declaration"
+	if isGlobal {
+		scope.globalDeclarations = append(scope.globalDeclarations, globalDeclaration{at: int(n.StartByte())})
+	}
 
 	if name != nil {
 		switch name.Kind() {
 		case "identifier":
-			if isLocal {
+			if isGlobal {
+				sym = w.declare(scope, name, KindFunction, int(n.StartByte()))
+				sym.Global, sym.ExplicitGlobal = true, true
+			} else if isLocal {
 				// `local function f` is visible inside its own body (recursion).
 				sym = w.declare(scope, name, KindFunction, int(n.StartByte()))
 			} else if existing := w.resolve(scope, name.Utf8Text(w.file.Text), int(name.StartByte())); existing != nil {
@@ -371,7 +413,7 @@ func (w *walker) functionDeclaration(n *tree_sitter.Node, scope *Scope) {
 					Name: existing.Name, Start: int(name.StartByte()), End: int(name.EndByte()), Scope: scope, Symbol: existing,
 				})
 				sym = existing
-			} else {
+			} else if scope.allowsImplicitGlobals(int(name.StartByte())) {
 				sym = w.declareGlobal(name, KindFunction, scope)
 			}
 		case "dot_index_expression", "method_index_expression":
@@ -392,9 +434,14 @@ func (w *walker) functionDeclaration(n *tree_sitter.Node, scope *Scope) {
 
 	fn := w.newScope(ScopeFunction, scope, n)
 	if sym != nil {
-		sym.FullStart = int(n.StartByte())
+		if !sym.ExplicitGlobal || sym.FullStart >= int(n.StartByte()) {
+			sym.FullStart = int(n.StartByte())
+		}
 		sym.FullEnd = int(n.EndByte())
 		sym.Detail = fmt.Sprintf("function %s(%s)", sym.Name, w.parameterNames(n))
+		if sym.ExplicitGlobal {
+			sym.Detail = "global " + sym.Detail
+		}
 		if sym.Inner == nil {
 			sym.Inner = fn
 		}
@@ -405,6 +452,11 @@ func (w *walker) functionDeclaration(n *tree_sitter.Node, scope *Scope) {
 }
 
 func (w *walker) variableDeclaration(n *tree_sitter.Node, scope *Scope) {
+	kind := KindLocal
+	if fieldNameOf(n) == "global_declaration" {
+		kind = KindGlobal
+		scope.globalDeclarations = append(scope.globalDeclarations, globalDeclaration{at: int(n.EndByte())})
+	}
 	cursor := n.Walk()
 	children := n.NamedChildren(cursor)
 	cursor.Close()
@@ -425,12 +477,12 @@ func (w *walker) variableDeclaration(n *tree_sitter.Node, scope *Scope) {
 			}
 			for j := range parts {
 				if parts[j].Kind() == "variable_list" {
-					w.declareVariableList(&parts[j], scope, KindLocal, int(n.EndByte()))
+					w.declareVariableList(&parts[j], scope, kind, int(n.EndByte()))
 				}
 			}
 		case "variable_list":
 			// `local a, b` without initializer.
-			w.declareVariableList(c, scope, KindLocal, int(n.EndByte()))
+			w.declareVariableList(c, scope, kind, int(n.EndByte()))
 		default:
 			w.walk(c, scope)
 		}
@@ -441,7 +493,10 @@ func (w *walker) declareVariableList(list *tree_sitter.Node, scope *Scope, kind 
 	cursor := list.Walk()
 	for _, name := range list.ChildrenByFieldName("name", cursor) {
 		if name.Kind() == "identifier" {
-			w.declare(scope, &name, kind, visibleFrom)
+			sym := w.declare(scope, &name, kind, visibleFrom)
+			if kind == KindGlobal {
+				sym.Global, sym.ExplicitGlobal = true, true
+			}
 		} else {
 			w.walk(&name, scope)
 		}
@@ -482,6 +537,10 @@ func (w *walker) identifierOrGlobalDefinition(ident *tree_sitter.Node, scope *Sc
 		w.file.References = append(w.file.References, Reference{
 			Name: name, Start: int(ident.StartByte()), End: int(ident.EndByte()), Scope: scope, Symbol: sym,
 		})
+		return
+	}
+	if !scope.allowsImplicitGlobals(int(ident.StartByte())) {
+		w.identifier(ident, scope)
 		return
 	}
 	if existing, ok := w.file.Globals[name]; ok {
@@ -541,7 +600,7 @@ func (w *walker) identifier(n *tree_sitter.Node, scope *Scope) {
 	name := n.Utf8Text(w.file.Text)
 	ref := Reference{Name: name, Start: int(n.StartByte()), End: int(n.EndByte()), Scope: scope}
 	ref.Symbol = w.resolve(scope, name, ref.Start)
-	if ref.Symbol == nil {
+	if ref.Symbol == nil && scope.allowsImplicitGlobals(ref.Start) {
 		ref.Symbol = w.file.Globals[name]
 	}
 	w.file.References = append(w.file.References, ref)
@@ -562,12 +621,12 @@ func fieldNameOf(n *tree_sitter.Node) string {
 	return ""
 }
 
-// resolve walks the scope chain for a local declared before `at`.
+// resolve walks the scope chain for a lexical declaration visible at `at`.
 func (w *walker) resolve(scope *Scope, name string, at int) *Symbol {
 	for s := scope; s != nil; s = s.Parent {
 		for i := len(s.Symbols) - 1; i >= 0; i-- {
 			sym := s.Symbols[i]
-			if sym.Name == name && !sym.Global && sym.Kind != KindField && sym.VisibleFrom <= at {
+			if sym.Name == name && (!sym.Global || sym.ExplicitGlobal) && sym.Kind != KindField && sym.VisibleFrom <= at {
 				return sym
 			}
 		}
@@ -622,19 +681,22 @@ func (f *File) SymbolAt(offset int) (*Symbol, *Reference) {
 	return found, nil
 }
 
-// VisibleSymbols lists locals visible at the offset (innermost first) followed by globals.
+// VisibleSymbols lists lexical declarations (innermost first), then implicit globals.
 func (f *File) VisibleSymbols(offset int) []*Symbol {
 	seen := map[string]bool{}
 	var out []*Symbol
 	for s := f.ScopeAt(offset); s != nil; s = s.Parent {
 		for i := len(s.Symbols) - 1; i >= 0; i-- {
 			sym := s.Symbols[i]
-			if sym.Global || sym.Kind == KindField || sym.VisibleFrom > offset || seen[sym.Name] {
+			if (sym.Global && !sym.ExplicitGlobal) || sym.Kind == KindField || sym.VisibleFrom > offset || seen[sym.Name] {
 				continue
 			}
 			seen[sym.Name] = true
 			out = append(out, sym)
 		}
+	}
+	if !f.ScopeAt(offset).allowsImplicitGlobals(offset) {
+		return out
 	}
 	names := make([]string, 0, len(f.Globals))
 	for name := range f.Globals {

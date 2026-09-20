@@ -17,6 +17,7 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 - Coroutine breakpoints and stepping for `coroutine.create` / `coroutine.wrap`, with a coroutine list, suspended stacks, locals/upvalues, and evaluation or assignment in the selected frame.
 - Member completion through table aliases, table-valued `__index`, simple functions returning table literals, and top-level exports from local `require` modules.
 - Lua 5.1–5.5 and LuaJIT 2.1 debugging; in trusted workspaces, syntax checking and standard-library completion follow Lua 5.1–5.5 and LuaJIT 2.1 interpreter versions.
+- Lua 5.5 declarations: definition navigation and outline for `global` / `global function`, lexical shadowing, prefixed attributes, and named vararg parameters (`...args`). `global *` and `global <const> *` preserve implicit global lookup without creating fake outline symbols.
 - Program stdout/stderr are separate from the debugger protocol, including direct `io.stdout:write` and output without newlines.
 - English and Simplified Chinese UI.
 
@@ -122,7 +123,6 @@ To retry publishing, open Actions → Release → Run workflow and enter an exis
 - **Runtime control:** pause and breakpoint updates are processed at the next Lua debug hook; blocking C functions and system calls cannot be interrupted. Without the native helper, pause is unavailable and breakpoint changes wait until the next stop. Interactive program stdin is unavailable.
 - **Coroutine execution control:** stepping a coroutine other than the currently stopped one and independently resuming other suspended coroutines are unsupported. Errors caught by `coroutine.resume` do not pause inside the failed coroutine. Replacing the debugger's hooks is unsupported. Lua 5.1 / LuaJIT cannot inspect the suspended main thread from a stopped coroutine; JIT compilation is disabled while debugging LuaJIT.
 - **Integration:** no attach to an existing process or embedded Lua support.
-- **New Lua 5.5 declarations:** scope analysis, definitions and outlines still use a Lua 5.4 syntax tree, so semantic support for these declarations is incomplete.
 - **Complex type inference:** no control-flow merging, function-valued `__index`, or complex return-value inference.
 - **Module resolution:** nested exports, custom `package.path`, C modules and dynamic loaders are unsupported; file-size and dependency-depth limits apply.
 - **Diagnostics:** interpreter errors are in English, report the first syntax error with a line-level range, and have no automatic fixes. Some fallback diagnostics remain generic.
