@@ -3,6 +3,7 @@ package lsp
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -27,7 +28,7 @@ const libraryProbe = `io.write(_VERSION, "\n")
 for k,v in pairs(_G) do
  if type(k)=="string" then io.write("_G\t", k, "\t", type(v), "\n") end
 end
-for _,lib in ipairs{"bit32","coroutine","debug","io","math","os","package","string","table","utf8"} do
+for _,lib in ipairs{"bit","jit","bit32","coroutine","debug","io","math","os","package","string","table","utf8"} do
  for k,v in pairs(_G[lib] or {}) do
   if type(k)=="string" then io.write(lib, "\t", k, "\t", type(v), "\n") end
  end
@@ -42,13 +43,13 @@ func inspectInterpreter(path string) *interpreter {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, path, "-E", "-e", libraryProbe).Output()
+	output, err := interpreterCommand(ctx, path, libraryProbe).Output()
 	if err != nil {
 		return nil
 	}
 	// Windows Lua writes CRLF through its text-mode stdout.
 	lines := strings.Split(strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n")), "\n")
-	if len(lines) == 0 || (lines[0] != "Lua 5.2" && lines[0] != "Lua 5.3" && lines[0] != "Lua 5.4" && lines[0] != "Lua 5.5") {
+	if len(lines) == 0 || (lines[0] != "Lua 5.1" && lines[0] != "Lua 5.2" && lines[0] != "Lua 5.3" && lines[0] != "Lua 5.4" && lines[0] != "Lua 5.5") {
 		return nil
 	}
 	result := &interpreter{path: path, version: lines[0], members: map[string][]analysis.Member{}, globals: map[string]bool{}}
@@ -66,18 +67,42 @@ func inspectInterpreter(path string) *interpreter {
 	return result
 }
 
-// load compiles but never calls the chunk. -E suppresses LUA_INIT and LUA_PATH
-// environment customization. A fixed chunk name makes error parsing unambiguous.
+// Lua 5.1 has no -E option. Remove Lua initialization and search-path overrides
+// from the child environment for every version instead of executing startup code.
+func interpreterCommand(ctx context.Context, path, probe string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, path, "-e", probe)
+	cmd.Env = []string{}
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		key = strings.ToUpper(key)
+		if key == "LUA_INIT" || strings.HasPrefix(key, "LUA_INIT_") ||
+			key == "LUA_PATH" || strings.HasPrefix(key, "LUA_PATH_") ||
+			key == "LUA_CPATH" || strings.HasPrefix(key, "LUA_CPATH_") {
+			continue
+		}
+		cmd.Env = append(cmd.Env, entry)
+	}
+	return cmd
+}
+
+// Compile source without executing it. Reject binary chunks before loadstring
+// on Lua 5.1, which has no text-only loading mode. Use a fixed diagnostic name.
 const syntaxProbe = `local source=io.read("*a")
 if source:sub(1,3)=="\239\187\191" then source=source:sub(4) end
 if source:sub(1,1)=="#" then source=source:gsub("^[^\n]*", "", 1) end
-local chunk,err=load(source,"@document","t",{})
+if source:byte(1)==27 then io.write("document:1: binary chunks are not supported"); return end
+local chunk,err
+if _VERSION=="Lua 5.1" then
+ chunk,err=loadstring(source,"@document")
+else
+ chunk,err=load(source,"@document","t",{})
+end
 if not chunk then io.write(err) end`
 
 func (runtime *interpreter) syntaxDiagnostics(text []byte) ([]protocol.Diagnostic, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, runtime.path, "-E", "-e", syntaxProbe)
+	cmd := interpreterCommand(ctx, runtime.path, syntaxProbe)
 	cmd.Stdin = bytes.NewReader(text)
 	output, err := cmd.Output()
 	if err != nil {

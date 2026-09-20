@@ -6,5 +6,14 @@
   "Debug Lua file": "调试 Lua 文件",
   "Lua DevTools Language Server": "Lua DevTools 语言服务",
   "Run Lua test": "运行 Lua 测试",
-  "Debug Lua test": "调试 Lua 测试"
+  "Debug Lua test": "调试 Lua 测试",
+  "Lua Interpreter": "Lua 解释器",
+  "Select Lua Interpreter": "选择 Lua 解释器",
+  "Lua interpreter unavailable: {0}": "Lua 解释器不可用：{0}",
+  "No Lua interpreter found.": "未找到 Lua 解释器。",
+  "Finding Lua interpreters…": "正在查找 Lua 解释器…",
+  "Enter interpreter path…": "输入解释器路径…",
+  "Use automatic detection": "使用自动检测",
+  "Currently selected": "当前选择",
+  "Enter an absolute executable path or a command on PATH.": "输入可执行文件的绝对路径或 PATH 中的命令。"
 }

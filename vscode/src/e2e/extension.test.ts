@@ -88,7 +88,7 @@ suite('Lua DevTools end to end', function () {
 
   test('registers its commands', async () => {
     const commands = await vscode.commands.getCommands(true);
-    for (const name of ['luaDevtools.run', 'luaDevtools.debug']) {
+    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter']) {
       assert.ok(commands.includes(name), `${name} is registered`);
     }
   });

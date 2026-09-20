@@ -230,12 +230,7 @@ jobs:
         run: node scripts/build-native.mjs
 
       - name: Test debugger and language server with selected Lua (race detector enabled)
-        if: matrix.lua != '5.1.5'
         run: go test -race -tags=integration -count=1 -timeout=60s -v ./internal/dap ./internal/lsp
-
-      - name: Test Lua 5.1 debugger compatibility
-        if: matrix.lua == '5.1.5'
-        run: go test -race -tags=integration -count=1 -timeout=60s -v ./internal/dap
 
       - name: Test pure Lua fallback
         env:
@@ -275,10 +270,10 @@ jobs:
           make -C "$RUNNER_TEMP/LuaJIT-$commit" -j2
           echo "LUA_TEST_BINARY=$RUNNER_TEMP/LuaJIT-$commit/src/luajit" >> "$GITHUB_ENV"
           node scripts/build-native.mjs
-      - name: Test LuaJIT debugger and native control
+      - name: Test LuaJIT debugger, language server and native control
         env:
           LUA_TEST_NATIVE_REQUIRED: '1'
-        run: go test -race -tags=integration -count=1 -timeout=60s -v ./internal/dap
+        run: go test -race -tags=integration -count=1 -timeout=60s -v ./internal/dap ./internal/lsp
       - name: Test LuaJIT pure Lua fallback
         env:
           LUA_DEVTOOLS_NATIVE: 'off'

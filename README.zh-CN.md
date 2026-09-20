@@ -16,7 +16,7 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 - 编辑器右上角 Run / Debug 按钮；无 launch.json 时对当前 `.lua` 文件直接 F5。
 - 支持 `coroutine.create` / `coroutine.wrap` 中的断点和单步；提供协程列表，可查看挂起协程的调用栈、局部变量和 upvalue，并在选中栈帧中求值或赋值。
 - 成员补全支持表别名、表形式的 `__index`、简单函数返回的表字面量，以及本地 `require` 模块的顶层导出。
-- 支持 Lua 5.1–5.5 和 LuaJIT 2.1 调试；在受信任的工作区中，语法检查和标准库补全跟随 Lua 5.2–5.5 解释器版本。
+- 支持 Lua 5.1–5.5 和 LuaJIT 2.1 调试；在受信任的工作区中，语法检查和标准库补全跟随 Lua 5.1–5.5 和 LuaJIT 2.1 解释器版本。
 - 程序 stdout/stderr 与调试协议分离，支持直接 `io.stdout:write` 及不带换行的输出。
 - 中英文界面。
 
@@ -24,7 +24,7 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 
 扩展不自带 Lua 解释器。每个 OS/架构安装包包含一个可选的 C 模块，仅使用四个稳定的 Lua C API，不链接指定版本的 liblua。macOS/Linux 从宿主进程解析符号；Windows 从已加载模块查找导出，不依赖 DLL 名称。解释器必须允许动态加载并导出所需符号；Windows 检测到多个 Lua API 提供者时也会回退。模块缺失或加载失败时自动使用纯 Lua 调试。
 
-模块提供 stdin 就绪检测，让调试器在运行中接收暂停和断点修改。Lua 5.1 / LuaJIT 的语言服务目前仍回退到内置 Lua 5.4 分析；解释器版本感知的诊断和标准库补全继续支持 Lua 5.2–5.5。
+模块提供 stdin 就绪检测，让调试器在运行中接收暂停和断点修改。解释器版本感知的诊断和标准库补全支持 Lua 5.1–5.5 和 LuaJIT 2.1，包括 Lua 5.1 环境函数和 LuaJIT 的 `bit` / `jit` 库。
 
 ## 测试 CodeLens
 
@@ -43,6 +43,8 @@ Busted 支持 `describe`、`context`、`insulate`、`expose` 下的 `it`、`spec
 
 ## 配置
 
+打开 Lua 文件后，点击状态栏的解释器版本，或运行 **Lua DevTools: 选择解释器**。列表会发现 PATH 和常见 Homebrew 安装中的 Lua 5.1–5.5 / LuaJIT 2.1，也可输入绝对路径或 PATH 中的命令，或恢复自动检测。选择保存到工作区的 `luaDevtools.luaPath`（未打开工作区时保存到用户设置），并自动重启语言服务；之后的运行和调试使用该解释器。多根工作区共用此选择；launch 配置中的 `luaPath` 仍优先。不受信任的工作区需先授予信任才能探测解释器。
+
 | 设置 | 说明 |
 |---|---|
 | `luaDevtools.luaPath` | Lua 解释器路径；为空时依次查找 `lua5.4`、Homebrew `lua@5.4`、`lua` |
@@ -50,7 +52,7 @@ Busted 支持 `describe`、`context`、`insulate`、`expose` 下的 `it`、`spec
 
 同时安装多个 Lua 版本时，通过 `luaDevtools.luaPath` 选择语言服务和调试共用的解释器；launch 配置中的 `luaPath` 只覆盖该调试会话。自动查找仍优先使用 Lua 5.4；只有 `lua5.2`、`lua5.3` 或 `lua5.5` 名称的可执行文件需要显式指定。修改设置后语言服务自动重启。
 
-在受信任的工作区中，语法检查和标准库补全跟随所选 Lua 5.2–5.5 解释器。检查只编译文档，不执行文档代码，并禁用 `LUA_INIT`；解释器不可用或工作区不受信任时，回退到内置 Lua 5.4 分析。
+在受信任的工作区中，语法检查和标准库补全跟随所选 Lua 5.1–5.5 或 LuaJIT 2.1 解释器。检查只编译文档，不执行文档代码，并禁用 `LUA_INIT`；解释器不可用或工作区不受信任时，回退到内置 Lua 5.4 分析。
 
 静态 `require("foo.bar")` 补全查找所属工作区根目录下的 `foo/bar.lua` 或 `foo/bar/init.lua`；工作区外的文件以自身目录为根。优先读取已打开文档的未保存内容，不执行模块。
 
@@ -67,7 +69,7 @@ launch 配置（`type: "lua"`）：
 
 ## 开发
 
-需要 Node.js 24 LTS、`go.mod` 指定版本的 Go 和 C 编译器（tree-sitter 通过 cgo 编译）、Lua 5.2–5.5。
+需要 Node.js 24 LTS、`go.mod` 指定版本的 Go 和 C 编译器（tree-sitter 通过 cgo 编译）、Lua 5.1–5.5 或 LuaJIT 2.1。
 
 ```sh
 npm ci
@@ -77,7 +79,7 @@ npm run test:e2e    # 在真实 VS Code 里跑扩展（首次会下载 VS Code�
 npm run package     # 平台专属 VSIX，输出在 vscode/
 ```
 
-CI 单独运行 Linux 兼容性矩阵，覆盖 **Lua 5.1.5、5.2.4、5.3.6、5.4.9、5.5.1**。各版本从校验 SHA-256 的官方源码构建，运行启用 race detector 的 Go DAP 集成测试和 DAP 冒烟测试，Lua 5.2–5.5 另运行 LSP 集成测试。各版本验证原生轮询及纯 Lua 回退，LuaJIT 2.1 使用单独的固定提交测试任务。测试会显式核对所选解释器的版本；解释器不存在或版本不匹配会直接失败。
+CI 单独运行 Linux 兼容性矩阵，覆盖 **Lua 5.1.5、5.2.4、5.3.6、5.4.9、5.5.1**。各版本从校验 SHA-256 的官方源码构建，运行启用 race detector 的 Go DAP、LSP 集成测试和 DAP 冒烟测试。各版本验证原生轮询及纯 Lua 回退，LuaJIT 2.1 使用单独的固定提交测试任务验证 DAP 和 LSP。测试会显式核对所选解释器的版本；解释器不存在或版本不匹配会直接失败。
 
 平台任务构建并打包全部六种目标。Linux、macOS 和 Windows 均运行 DAP 测试；Windows 构建自定义 DLL 名称的 Lua，验证动态 API 解析。Linux x64 和 macOS ARM64 运行真实 VS Code 端到端测试。
 

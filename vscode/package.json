@@ -38,6 +38,10 @@
         "command": "luaDevtools.debug",
         "title": "%command.debug%",
         "icon": "$(debug-alt)"
+      },
+      {
+        "command": "luaDevtools.selectInterpreter",
+        "title": "%command.selectInterpreter%"
       }
     ],
     "breakpoints": [

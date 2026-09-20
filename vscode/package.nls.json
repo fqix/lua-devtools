@@ -16,5 +16,6 @@
   "config.trace.server": "Traces the JSON-RPC communication between VS Code and the Lua language server (Output panel).",
   "launch.packagePath": "Extra Lua module search patterns added to LUA_PATH before the interpreter defaults, e.g. \"${workspaceFolder}/src/?.lua\".",
   "launch.packageCPath": "Extra C module search patterns added to LUA_CPATH before the interpreter defaults, e.g. \"${workspaceFolder}/lib/?.so\".",
-  "launch.env": "Environment variables for the Lua process."
+  "launch.env": "Environment variables for the Lua process.",
+  "command.selectInterpreter": "Lua DevTools: Select Interpreter"
 }

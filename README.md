@@ -16,7 +16,7 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 - Run / Debug buttons in the editor title; F5 on the active `.lua` file works without a launch.json.
 - Coroutine breakpoints and stepping for `coroutine.create` / `coroutine.wrap`, with a coroutine list, suspended stacks, locals/upvalues, and evaluation or assignment in the selected frame.
 - Member completion through table aliases, table-valued `__index`, simple functions returning table literals, and top-level exports from local `require` modules.
-- Lua 5.1–5.5 and LuaJIT 2.1 debugging; in trusted workspaces, syntax checking and standard-library completion follow Lua 5.2–5.5 interpreter versions.
+- Lua 5.1–5.5 and LuaJIT 2.1 debugging; in trusted workspaces, syntax checking and standard-library completion follow Lua 5.1–5.5 and LuaJIT 2.1 interpreter versions.
 - Program stdout/stderr are separate from the debugger protocol, including direct `io.stdout:write` and output without newlines.
 - English and Simplified Chinese UI.
 
@@ -24,7 +24,7 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 
 No Lua interpreter is bundled. Each OS/architecture package includes one optional C module using only four stable Lua C API functions, without linking a specific liblua version. macOS/Linux resolve symbols from the host process; Windows locates exports in loaded modules regardless of DLL name. The interpreter must support dynamic loading and export the required symbols; Windows also falls back if multiple Lua API providers are found. A missing or unloadable module automatically falls back to pure Lua debugging.
 
-The module checks stdin readiness so the debugger can receive pause requests and breakpoint updates while running. Language support for Lua 5.1 / LuaJIT currently falls back to the built-in Lua 5.4 analysis; interpreter-aware diagnostics and standard-library completion continue to support Lua 5.2–5.5.
+The module checks stdin readiness so the debugger can receive pause requests and breakpoint updates while running. Interpreter-aware diagnostics and standard-library completion support Lua 5.1–5.5 and LuaJIT 2.1, including Lua 5.1 environment functions and LuaJIT’s `bit` / `jit` libraries.
 
 ## Test CodeLens
 
@@ -43,6 +43,8 @@ Discovery is static: local LuaUnit suites, dynamically generated cases/names, cu
 
 ## Settings
 
+With a Lua file open, click the interpreter version in the status bar or run **Lua DevTools: Select Interpreter**. The picker discovers Lua 5.1–5.5 / LuaJIT 2.1 on PATH and in common Homebrew locations. You can also enter an absolute executable path or a command on PATH, or restore automatic detection. Selection updates workspace `luaDevtools.luaPath` (user settings when no workspace is open) and restarts the language server; subsequent runs and debug sessions use it. Multi-root workspaces share this selection; a launch configuration’s `luaPath` still takes precedence. Interpreter probing requires workspace trust.
+
 | Setting | Description |
 |---|---|
 | `luaDevtools.luaPath` | Lua interpreter; when empty, `lua5.4`, Homebrew `lua@5.4` and `lua` are tried in order |
@@ -50,7 +52,7 @@ Discovery is static: local LuaUnit suites, dynamically generated cases/names, cu
 
 Set `luaDevtools.luaPath` to select the interpreter for both language support and debugging; a launch configuration's `luaPath` overrides only that debug session. Automatic discovery still prefers Lua 5.4; executables named only `lua5.2`, `lua5.3`, or `lua5.5` must be selected explicitly. Changing the setting restarts the language server.
 
-In trusted workspaces, syntax checking and standard-library completion follow the selected Lua 5.2–5.5 interpreter. Syntax checking compiles the document without executing it and disables `LUA_INIT`. Without a working interpreter, or in untrusted workspaces, analysis falls back to the built-in Lua 5.4 support.
+In trusted workspaces, syntax checking and standard-library completion follow the selected Lua 5.1–5.5 or LuaJIT 2.1 interpreter. Syntax checking compiles the document without executing it and disables `LUA_INIT`. Without a working interpreter, or in untrusted workspaces, analysis falls back to the built-in Lua 5.4 support.
 
 Static `require("foo.bar")` completion searches `foo/bar.lua` and `foo/bar/init.lua` under the containing workspace root, or the document directory for files outside a workspace. Unsaved open documents take precedence over disk files; modules are never executed.
 
@@ -67,7 +69,7 @@ Launch configuration (`type: "lua"`):
 
 ## Development
 
-Requirements: Node.js 24 LTS, the Go version in `go.mod` with a C compiler (tree-sitter is built through cgo), and Lua 5.2–5.5.
+Requirements: Node.js 24 LTS, the Go version in `go.mod` with a C compiler (tree-sitter is built through cgo), and Lua 5.1–5.5 or LuaJIT 2.1.
 
 ```sh
 npm ci
@@ -77,7 +79,7 @@ npm run test:e2e    # the extension inside a real VS Code (downloads VS Code on 
 npm run package     # platform-specific VSIX in vscode/
 ```
 
-CI runs a separate Linux compatibility matrix against Lua **5.1.5, 5.2.4, 5.3.6, 5.4.9, and 5.5.1**, built from checksum-verified official sources. Each version runs the Go DAP integration tests with the race detector and the DAP smoke test; Lua 5.2–5.5 also run the LSP integration tests. Native polling and pure Lua fallback are both tested. A separate job tests a pinned LuaJIT 2.1 commit. The selected interpreter's version is checked explicitly; a missing or mismatched interpreter fails the job.
+CI runs a separate Linux compatibility matrix against Lua **5.1.5, 5.2.4, 5.3.6, 5.4.9, and 5.5.1**, built from checksum-verified official sources. Each version runs the Go DAP and LSP integration tests with the race detector and the DAP smoke test. Native polling and pure Lua fallback are both tested. A separate job tests DAP and LSP against a pinned LuaJIT 2.1 commit. The selected interpreter's version is checked explicitly; a missing or mismatched interpreter fails the job.
 
 The platform jobs build and package all six targets. DAP tests run on Linux, macOS and Windows; Windows builds Lua with a custom DLL name to verify dynamic API resolution. VS Code end-to-end tests run on Linux x64 and macOS ARM64.
 

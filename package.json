@@ -11,12 +11,13 @@
     "build": "node scripts/build-go.mjs && npm run build -w vscode",
     "build:go": "node scripts/build-go.mjs",
     "check": "npm run check -w vscode",
-    "test": "npm run test:go && npm run test:lsp && npm run test:dap",
+    "test": "npm run test:extension && npm run test:go && npm run test:lsp && npm run test:dap",
     "test:go": "node scripts/build-go.mjs --test",
     "test:lsp": "node scripts/lsp-smoke.mjs",
     "test:dap": "node scripts/dap-smoke.mjs",
     "test:e2e": "node scripts/e2e.mjs",
     "package": "node scripts/package.mjs",
-    "package:all": "node scripts/package.mjs --all"
+    "package:all": "node scripts/package.mjs --all",
+    "test:extension": "node scripts/test-extension.mjs"
   }
 }

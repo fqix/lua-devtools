@@ -478,7 +478,8 @@ func (s *Server) builtinDoc(name string) (string, bool) {
 	if s.runtime != nil && !s.runtime.globals[name] {
 		return "", false
 	}
-	if s.runtime == nil && (name == "bit32" || name == "loadstring" || name == "unpack") {
+	if s.runtime == nil && (name == "bit32" || name == "loadstring" || name == "unpack" ||
+		name == "setfenv" || name == "getfenv" || name == "module" || name == "newproxy" || name == "bit" || name == "jit") {
 		return "", false
 	}
 	doc, ok := builtinDocs[name]
@@ -487,6 +488,12 @@ func (s *Server) builtinDoc(name string) (string, bool) {
 
 // builtinDocs describes globals across supported Lua versions; builtinDoc filters availability.
 var builtinDocs = map[string]string{
+	"getfenv":        "getfenv([f]) returns a function's environment (Lua 5.1)",
+	"setfenv":        "setfenv(f, table) sets a function's environment (Lua 5.1)",
+	"module":         "module(name [, ...]) creates a module (Lua 5.1)",
+	"newproxy":       "newproxy([boolean or proxy]) creates a userdata proxy (Lua 5.1)",
+	"bit":            "library: bitwise operations (LuaJIT)",
+	"jit":            "library: JIT compiler control (LuaJIT)",
 	"bit32":          "library: bitwise operations (Lua 5.2)",
 	"loadstring":     "loadstring(string [, chunkname]) compiles a Lua chunk",
 	"unpack":         "unpack(list [, i [, j]]) returns elements of a list",

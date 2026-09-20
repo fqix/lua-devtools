@@ -16,5 +16,6 @@
   "config.trace.server": "在 Output 面板中跟踪 VS Code 与 Lua 语言服务之间的 JSON-RPC 通信。",
   "launch.packagePath": "追加到 LUA_PATH 的模块搜索模式（优先于解释器默认值），例如 \"${workspaceFolder}/src/?.lua\"。",
   "launch.packageCPath": "追加到 LUA_CPATH 的 C 模块搜索模式（优先于解释器默认值），例如 \"${workspaceFolder}/lib/?.so\"。",
-  "launch.env": "Lua 进程的环境变量。"
+  "launch.env": "Lua 进程的环境变量。",
+  "command.selectInterpreter": "Lua DevTools: 选择解释器"
 }

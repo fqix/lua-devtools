@@ -4,5 +4,14 @@
   "Open a Lua file first.": "Open a Lua file first.",
   "Run Lua file": "Run Lua file",
   "Debug Lua file": "Debug Lua file",
-  "Lua DevTools Language Server": "Lua DevTools Language Server"
+  "Lua DevTools Language Server": "Lua DevTools Language Server",
+  "Lua Interpreter": "Lua Interpreter",
+  "Select Lua Interpreter": "Select Lua Interpreter",
+  "Lua interpreter unavailable: {0}": "Lua interpreter unavailable: {0}",
+  "No Lua interpreter found.": "No Lua interpreter found.",
+  "Finding Lua interpreters…": "Finding Lua interpreters…",
+  "Enter interpreter path…": "Enter interpreter path…",
+  "Use automatic detection": "Use automatic detection",
+  "Currently selected": "Currently selected",
+  "Enter an absolute executable path or a command on PATH.": "Enter an absolute executable path or a command on PATH."
 }
