@@ -209,3 +209,44 @@ func TestModuleResolverDoesNotFollowOutsideSymlink(t *testing.T) {
 		t.Fatalf("configured path followed an outside symlink: %+v", got)
 	}
 }
+
+func TestModuleRootsRefreshBetweenRequests(t *testing.T) {
+	root, library := t.TempDir(), filepath.Join(t.TempDir(), "packages")
+	uri := pathFileURI(filepath.Join(root, "main.lua"))
+	server := &Server{workspaceRoots: []string{root}, modulePaths: []moduleSearchPath{{
+		Root: root, Templates: []string{filepath.Join(library, "?.lua"), filepath.Join(library, "?", "init.lua")},
+	}}}
+	if got := server.moduleResolver(uri)("installed"); len(got) != 0 {
+		t.Fatalf("unexpected missing module: %+v", got)
+	}
+	if err := os.MkdirAll(library, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(library, "installed.lua"), []byte("return {available=true}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := server.moduleResolver(uri)("installed"); len(got) != 1 || got[0].Name != "available" {
+		t.Fatalf("new request retained missing root: %+v", got)
+	}
+}
+
+func BenchmarkModuleSearchMisses(b *testing.B) {
+	root := b.TempDir()
+	directory := filepath.Join(root, "app", "features", "services", "handlers")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		b.Fatal(err)
+	}
+	server := &Server{workspaceRoots: []string{root}, modulePaths: []moduleSearchPath{{
+		Root: root, Templates: []string{filepath.Join(root, "?.lua"), filepath.Join(root, "?", "init.lua")},
+	}}}
+	uri := pathFileURI(filepath.Join(directory, "main.lua"))
+	b.ReportAllocs()
+	for b.Loop() {
+		resolve := server.moduleResolver(uri)
+		for _, name := range []string{"missingA", "missingB", "missingC", "missingD"} {
+			if got := resolve(name); len(got) != 0 {
+				b.Fatal(got)
+			}
+		}
+	}
+}

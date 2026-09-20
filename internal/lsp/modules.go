@@ -97,6 +97,9 @@ func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []
 		roots = append(roots, dir)
 	}
 	cache := map[string][]analysis.Member{}
+	// Share root resolution across candidates and nested requires in this request.
+	// Empty results also cache failed lookups; the next request retries them.
+	canonicalRoots := map[string]string{}
 	depth := 0
 	remaining := 8 << 20
 	var resolve func(string) []analysis.Member
@@ -149,8 +152,12 @@ func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []
 				}
 			}
 			if text == nil {
-				canonicalRoot, err := filepath.EvalSymlinks(candidate.root)
-				if err != nil {
+				canonicalRoot, cached := canonicalRoots[candidate.root]
+				if !cached {
+					canonicalRoot, _ = filepath.EvalSymlinks(candidate.root)
+					canonicalRoots[candidate.root] = canonicalRoot
+				}
+				if canonicalRoot == "" {
 					continue
 				}
 				canonical, err := filepath.EvalSymlinks(candidate.path)
