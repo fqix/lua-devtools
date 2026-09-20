@@ -59,6 +59,8 @@ var catalogs = map[string]map[string]string{
 		"dap.notPaused":          "the program is running; pause at a breakpoint first",
 		"dap.unsupportedRequest": "unsupported request: %s",
 		"dap.breakpointsQueued":  "Applied at the next pause",
+		"dap.breakpointsPending": "Waiting for the next Lua debug hook",
+		"dap.pauseUnavailable":   "Pause requires the native polling helper and debugging to be enabled",
 	},
 	"zh-cn": {
 		"codelens.runTest":       "$(beaker) 运行测试",
@@ -82,5 +84,7 @@ var catalogs = map[string]map[string]string{
 		"dap.notPaused":          "程序正在运行，请先在断点处暂停",
 		"dap.unsupportedRequest": "不支持的请求：%s",
 		"dap.breakpointsQueued":  "将在下次暂停时生效",
+		"dap.breakpointsPending": "等待下一个 Lua 调试 hook 生效",
+		"dap.pauseUnavailable":   "主动暂停需要加载原生轮询模块并启用调试",
 	},
 }

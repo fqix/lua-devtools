@@ -55,9 +55,10 @@ type Server struct {
 
 	// Breakpoint ids per file, needed to update `verified` through breakpoint events.
 	// Guarded by bpMu: both the request loop and the event pump assign ids.
-	bpMu     sync.Mutex
-	bpIDs    map[string]map[int]int
-	nextBpID int
+	bpMu        sync.Mutex
+	bpRequestMu sync.Mutex // send setBreakpoints response before asynchronous verification
+	bpIDs       map[string]map[int]int
+	nextBpID    int
 }
 
 type Options struct {
@@ -136,6 +137,14 @@ func (s *Server) handle(msg dap.Message) bool {
 		s.onResume(req.Request, req.Arguments.ThreadId, "stepIn", func() dap.Message { return &dap.StepInResponse{Response: s.newResponse(req.Request)} })
 	case *dap.StepOutRequest:
 		s.onResume(req.Request, req.Arguments.ThreadId, "stepOut", func() dap.Message { return &dap.StepOutResponse{Response: s.newResponse(req.Request)} })
+	case *dap.PauseRequest:
+		if s.rt == nil {
+			s.sendError(&req.Request, 1008, "Lua process is not running")
+		} else if err := s.rt.Pause(); err != nil {
+			s.sendError(&req.Request, 1008, err.Error())
+		} else {
+			s.send(&dap.PauseResponse{Response: s.newResponse(req.Request)})
+		}
 	case *dap.TerminateRequest:
 		if s.rt != nil {
 			s.rt.Dispose()
@@ -246,12 +255,14 @@ func (s *Server) pumpEvents(rt *Runtime) {
 			s.send(&dap.TerminatedEvent{Event: s.newEvent("terminated")})
 			return
 		case "breakpointsChanged":
+			s.bpRequestMu.Lock()
 			for _, bp := range s.toDapBreakpoints(ev.BreakpointFile, ev.Breakpoints) {
 				s.send(&dap.BreakpointEvent{
 					Event: s.newEvent("breakpoint"),
 					Body:  dap.BreakpointEventBody{Reason: "changed", Breakpoint: bp},
 				})
 			}
+			s.bpRequestMu.Unlock()
 		}
 	}
 }
@@ -269,6 +280,8 @@ func (s *Server) onConfigurationDone(req *dap.ConfigurationDoneRequest) {
 }
 
 func (s *Server) onSetBreakpoints(req *dap.SetBreakpointsRequest) {
+	s.bpRequestMu.Lock()
+	defer s.bpRequestMu.Unlock()
 	file := NormalizePath(req.Arguments.Source.Path)
 	requested := make([]SourceBreakpoint, 0, len(req.Arguments.Breakpoints))
 	for _, bp := range req.Arguments.Breakpoints {
@@ -290,7 +303,7 @@ func (s *Server) onSetBreakpoints(req *dap.SetBreakpointsRequest) {
 }
 
 // requirePaused answers requests that need a paused debuggee with an error
-// instead of blocking the request loop: Lua only reads commands while paused.
+// instead of inspecting a stack while the program is running.
 func (s *Server) requirePaused(req *dap.Request, code int) bool {
 	if s.rt == nil {
 		s.sendError(req, code, s.t("dap.notLaunched"))

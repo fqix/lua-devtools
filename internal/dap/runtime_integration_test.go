@@ -88,12 +88,14 @@ func TestRuntimeOutputIsolation(t *testing.T) {
 	t.Parallel()
 	r, _ := startTestRuntime(t, `io.stdout:write('{"event":"stopped","reason":"fake"}\n')
 io.stdout:write('{"id":1,"body":{}}\n')
-assert(io.write("prefix") == io.stdout)
+local written = io.write("prefix")
+assert(written == io.stdout or (_VERSION == "Lua 5.1" and written == true))
 print("tail")
 local original = io.output()
 local file = assert(io.open("output.txt", "w"))
 io.output(file)
-assert(io.write("file-only") == file)
+written = io.write("file-only")
+assert(written == file or (_VERSION == "Lua 5.1" and written == true))
 file:close()
 io.output(original)
 local input = assert(io.open("output.txt", "r"))
@@ -297,6 +299,17 @@ assert(coroutine.resume(co))`)
 	}
 	runtimeRequest(t, func() error {
 		frames, err := r.Stack(1)
+		if err != nil && strings.Contains(err.Error(), "cannot inspect the suspended main thread") {
+			// Lua 5.1/LuaJIT expose no handle for the suspended main thread.
+			active, stackErr := r.Stack(event.ThreadID)
+			if stackErr != nil {
+				return stackErr
+			}
+			if len(active) != 1 || active[0].Line != 4 {
+				t.Fatalf("active coroutine: %+v", active)
+			}
+			return r.Resume("next", map[string]any{"threadId": event.ThreadID})
+		}
 		if err != nil {
 			return err
 		}
@@ -321,4 +334,112 @@ assert(coroutine.resume(co))`)
 	runtimeEvent(t, r, "stopped")
 	runtimeRequest(t, func() error { return r.Resume("continue", nil) })
 	runtimeEvent(t, r, "exited")
+}
+
+func TestRuntimeLiveControl(t *testing.T) {
+	r, file := startTestRuntime(t, `local n = 0
+while true do
+ n = n + 1
+end`)
+	if !r.liveControl {
+		if os.Getenv("LUA_TEST_NATIVE_REQUIRED") == "1" {
+			t.Fatal("native polling helper did not load")
+		}
+		t.Skip("interpreter cannot load native polling helper")
+	}
+	runtimeRequest(t, func() error { return r.Resume("run", map[string]any{"cwd": r.cmd.Dir}) })
+	runtimeRequest(t, r.Pause)
+	if event := runtimeEvent(t, r, "stopped"); event.Reason != "pause" {
+		t.Fatalf("stop: %+v", event)
+	}
+	runtimeRequest(t, func() error {
+		frames, err := r.Stack()
+		if err != nil {
+			return err
+		}
+		if len(frames) == 0 {
+			t.Fatal("empty stack after pause")
+		}
+		_, err = r.Evaluate("n", frames[0].ID)
+		return err
+	})
+	runtimeRequest(t, func() error { return r.Resume("continue", nil) })
+	runtimeRequest(t, func() error {
+		_, err := r.SetBreakpoints(file, []SourceBreakpoint{{Line: 3, Condition: "n > 0"}})
+		return err
+	})
+	update := runtimeEvent(t, r, "breakpointsChanged")
+	if len(update.Breakpoints) != 1 || !update.Breakpoints[0].Verified {
+		t.Fatalf("breakpoints: %+v", update)
+	}
+	if event := runtimeEvent(t, r, "stopped"); event.Reason != "breakpoint" || event.Line != 3 {
+		t.Fatalf("breakpoint: %+v", event)
+	}
+	runtimeRequest(t, func() error { _, err := r.SetBreakpoints(file, nil); return err })
+	runtimeRequest(t, func() error { return r.Resume("continue", nil) })
+	runtimeRequest(t, r.Pause)
+	if event := runtimeEvent(t, r, "stopped"); event.Reason != "pause" {
+		t.Fatalf("stop after removal: %+v", event)
+	}
+}
+
+func TestRuntimeNativeFallback(t *testing.T) {
+	t.Setenv("LUA_DEVTOOLS_NATIVE", filepath.Join(t.TempDir(), "missing-module"))
+	r, file := startTestRuntime(t, `local n=0
+while true do
+ n=n+1
+end`)
+	if r.liveControl {
+		t.Fatal("missing module advertised live control")
+	}
+	runtimeRequest(t, func() error { _, err := r.SetBreakpoints(file, []SourceBreakpoint{{Line: 3}}); return err })
+	runtimeRequest(t, func() error { return r.Resume("run", map[string]any{"cwd": r.cmd.Dir}) })
+	runtimeEvent(t, r, "stopped")
+	runtimeRequest(t, func() error { _, err := r.SetBreakpoints(file, nil); return err })
+	runtimeRequest(t, func() error { return r.Resume("continue", nil) })
+	if err := r.Pause(); err == nil {
+		t.Fatal("pause succeeded without helper")
+	}
+	bps, err := r.SetBreakpoints(file, []SourceBreakpoint{{Line: 3}})
+	if err != nil || len(bps) != 1 || bps[0].Verified {
+		t.Fatalf("fallback queue: %+v, %v", bps, err)
+	}
+}
+
+func TestRuntimePauseTightLoop(t *testing.T) {
+	r, _ := startTestRuntime(t, `while true do end`)
+	if !r.liveControl {
+		t.Skip("native helper unavailable")
+	}
+	runtimeRequest(t, func() error { return r.Resume("run", nil) })
+	runtimeRequest(t, r.Pause)
+	if event := runtimeEvent(t, r, "stopped"); event.Reason != "pause" {
+		t.Fatalf("stop: %+v", event)
+	}
+}
+
+func TestRuntimeLiveLargeBreakpointUpdate(t *testing.T) {
+	r, file := startTestRuntime(t, `local n=0
+while true do
+ n=n+1
+end`)
+	if !r.liveControl {
+		t.Skip("native helper unavailable")
+	}
+	runtimeRequest(t, func() error { return r.Resume("run", map[string]any{"cwd": r.cmd.Dir}) })
+	// Larger than an OS pipe buffer: the DAP caller must not wait on stdin writes.
+	bps := make([]SourceBreakpoint, 5000)
+	for i := range bps {
+		bps[i] = SourceBreakpoint{Line: i + 10, Condition: "false"}
+	}
+	runtimeRequest(t, func() error { _, err := r.SetBreakpoints(file, bps); return err })
+	runtimeEvent(t, r, "breakpointsChanged")
+	runtimeRequest(t, func() error { _, err := r.SetBreakpoints(file, nil); return err })
+	if event := runtimeEvent(t, r, "breakpointsChanged"); len(event.Breakpoints) != 0 {
+		t.Fatal("breakpoint removal failed")
+	}
+	runtimeRequest(t, r.Pause)
+	if event := runtimeEvent(t, r, "stopped"); event.Reason != "pause" {
+		t.Fatalf("stop: %+v", event)
+	}
 }

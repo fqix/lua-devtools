@@ -16,9 +16,15 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 - Run / Debug buttons in the editor title; F5 on the active `.lua` file works without a launch.json.
 - Coroutine breakpoints and stepping for `coroutine.create` / `coroutine.wrap`, with a coroutine list, suspended stacks, locals/upvalues, and evaluation or assignment in the selected frame.
 - Member completion through table aliases, table-valued `__index`, simple functions returning table literals, and top-level exports from local `require` modules.
-- Lua 5.2–5.5 debugging; in trusted workspaces, syntax checking and standard-library completion follow the selected interpreter version.
+- Lua 5.1–5.5 and LuaJIT 2.1 debugging; in trusted workspaces, syntax checking and standard-library completion follow Lua 5.2–5.5 interpreter versions.
 - Program stdout/stderr are separate from the debugger protocol, including direct `io.stdout:write` and output without newlines.
 - English and Simplified Chinese UI.
+
+## Native polling helper
+
+No Lua interpreter is bundled. Each OS/architecture package includes one optional C module using only four stable Lua C API functions, without linking a specific liblua version. macOS/Linux resolve symbols from the host process; Windows locates exports in loaded modules regardless of DLL name. The interpreter must support dynamic loading and export the required symbols; Windows also falls back if multiple Lua API providers are found. A missing or unloadable module automatically falls back to pure Lua debugging.
+
+The module checks stdin readiness so the debugger can receive pause requests and breakpoint updates while running. Language support for Lua 5.1 / LuaJIT currently falls back to the built-in Lua 5.4 analysis; interpreter-aware diagnostics and standard-library completion continue to support Lua 5.2–5.5.
 
 ## Test CodeLens
 
@@ -33,7 +39,7 @@ Discovery is static: local LuaUnit suites, dynamically generated cases/names, cu
 ## Requirements
 
 - VS Code ≥ 1.91
-- Lua 5.2, 5.3, 5.4, or 5.5 on the machine that runs the scripts (`brew install lua@5.4`, `apt install lua5.4`, …)
+- Lua 5.1–5.5 or LuaJIT 2.1 on the machine that runs the scripts (`brew install lua@5.4`, `apt install lua5.4`, …)
 
 ## Settings
 
@@ -71,9 +77,9 @@ npm run test:e2e    # the extension inside a real VS Code (downloads VS Code on 
 npm run package     # platform-specific VSIX in vscode/
 ```
 
-CI runs a separate Linux compatibility matrix against Lua **5.2.4, 5.3.6, 5.4.9, and 5.5.1**, built from checksum-verified official sources. Each version runs the Go DAP and LSP integration tests with the race detector and the DAP smoke test. The selected interpreter's version is checked explicitly; a missing or mismatched interpreter fails the job.
+CI runs a separate Linux compatibility matrix against Lua **5.1.5, 5.2.4, 5.3.6, 5.4.9, and 5.5.1**, built from checksum-verified official sources. Each version runs the Go DAP integration tests with the race detector and the DAP smoke test; Lua 5.2–5.5 also run the LSP integration tests. Native polling and pure Lua fallback are both tested. A separate job tests a pinned LuaJIT 2.1 commit. The selected interpreter's version is checked explicitly; a missing or mismatched interpreter fails the job.
 
-The platform jobs build and package all six targets. DAP tests run on Linux and macOS; VS Code end-to-end tests run on Linux x64 and macOS ARM64. Windows jobs currently cover Go tests and LSP smoke tests, but do not install Lua or run Lua DAP integration tests.
+The platform jobs build and package all six targets. DAP tests run on Linux, macOS and Windows; Windows builds Lua with a custom DLL name to verify dynamic API resolution. VS Code end-to-end tests run on Linux x64 and macOS ARM64.
 
 To reproduce a matrix entry locally:
 
@@ -111,8 +117,8 @@ To retry publishing, open Actions → Release → Run workflow and enter an exis
 
 ## Known limitations
 
-- **Runtime control:** no pause request while running; breakpoint changes take effect at the next stop. Interactive program stdin is unavailable.
-- **Coroutine execution control:** stepping a coroutine other than the currently stopped one and independently resuming other suspended coroutines are unsupported. Errors caught by `coroutine.resume` do not pause inside the failed coroutine. Replacing the debugger's hooks is unsupported.
+- **Runtime control:** pause and breakpoint updates are processed at the next Lua debug hook; blocking C functions and system calls cannot be interrupted. Without the native helper, pause is unavailable and breakpoint changes wait until the next stop. Interactive program stdin is unavailable.
+- **Coroutine execution control:** stepping a coroutine other than the currently stopped one and independently resuming other suspended coroutines are unsupported. Errors caught by `coroutine.resume` do not pause inside the failed coroutine. Replacing the debugger's hooks is unsupported. Lua 5.1 / LuaJIT cannot inspect the suspended main thread from a stopped coroutine; JIT compilation is disabled while debugging LuaJIT.
 - **Integration:** no attach to an existing process or embedded Lua support.
 - **New Lua 5.5 declarations:** scope analysis, definitions and outlines still use a Lua 5.4 syntax tree, so semantic support for these declarations is incomplete.
 - **Complex type inference:** no control-flow merging, function-valued `__index`, or complex return-value inference.

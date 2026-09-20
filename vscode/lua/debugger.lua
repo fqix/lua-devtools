@@ -9,11 +9,36 @@
 --
 -- stdout/stderr are reserved for program output, including writes from C modules.
 --
--- Pure Lua cannot read stdin without blocking, so commands are only read while paused
--- (breakpoint hit, step finished, or before the script starts).
+-- An optional ABI-neutral C module polls stdin from hooks. Without it, commands
+-- are read only while paused (breakpoint, step, or before the script starts).
 
 local scriptDir = (arg and arg[0] or ""):match("^(.*)[/\\]") or "."
 local json = dofile(scriptDir .. "/json.lua")
+
+local unpackValues = table.unpack or unpack
+local packValues = table.pack or function(...) return { n = select("#", ...), ... } end
+local function compile(source, name, env)
+  if _VERSION == "Lua 5.1" then
+    local fn, err = loadstring(source, name)
+    if fn then setfenv(fn, env) end
+    return fn, err
+  end
+  return load(source, name, "t", env)
+end
+
+local pollStdin
+local nativePath = os.getenv("LUA_DEVTOOLS_NATIVE")
+if nativePath ~= "off" then
+  nativePath = nativePath or (scriptDir .. "/../bin/lua-devtools-native." ..
+    (package.config:sub(1, 1) == "\\" and "dll" or "so"))
+  local ok, mod = pcall(function()
+    local open = assert(package.loadlib(nativePath, "luaopen_lua_devtools_native"))
+    return open()
+  end)
+  if ok and type(mod) == "table" and type(mod.poll_stdin) == "function" then
+    pollStdin = mod.poll_stdin
+  end
+end
 
 local SELF_SOURCE = debug.getinfo(1, "S").source
 
@@ -24,6 +49,8 @@ local SELF_SOURCE = debug.getinfo(1, "S").source
 local protocolPath = assert(os.getenv("LUA_DEVTOOLS_PROTOCOL"), "missing debugger protocol path")
 local protocol = assert(io.open(protocolPath, "ab"))
 local stdin = io.stdin
+-- Kernel readiness cannot see bytes prefetched into a FILE buffer.
+if not stdin:setvbuf("no") then pollStdin = nil end
 
 local function send(msg)
   assert(protocol:write(json.encode(msg), "\n"))
@@ -92,7 +119,45 @@ local step = nil       -- nil | { mode = "in"|"over"|"out", depth = number }
 local depth = 0        -- user-frame depth at the latest line hook
 local inDebugger = false -- suppress hooks in coroutines resumed by evaluation
 -- Weak registration does not keep otherwise unreachable coroutines alive.
-local mainThread = coroutine.running()
+local mainThread = coroutine.running() or {} -- Lua 5.1 has no main-thread handle
+local function currentThread() return coroutine.running() or mainThread end
+local function threadStatus(co)
+  if co == mainThread and type(co) ~= "thread" then return "normal" end
+  return coroutine.status(co)
+end
+-- Lua 5.1 cannot inspect its suspended main thread from a coroutine.
+-- Wrappers account for their own frame when inspecting the active thread.
+local function getInfo(co, level, what)
+  local info
+  if type(co) ~= "thread" then
+    assert(co == currentThread(), "Lua 5.1 cannot inspect the suspended main thread")
+    info = debug.getinfo(level + 1, what)
+  else
+    info = debug.getinfo(co, level + (co == currentThread() and 1 or 0), what)
+  end
+  -- Do not tail-call debug APIs: LuaJIT removes this frame, unlike PUC Lua.
+  return info
+end
+local function getLocal(co, level, index)
+  local name, value
+  if type(co) ~= "thread" then
+    assert(co == currentThread(), "Lua 5.1 cannot inspect the suspended main thread")
+    name, value = debug.getlocal(level + 1, index)
+  else
+    name, value = debug.getlocal(co, level + (co == currentThread() and 1 or 0), index)
+  end
+  return name, value
+end
+local function setLocal(co, level, index, value)
+  local name
+  if type(co) ~= "thread" then
+    assert(co == currentThread(), "Lua 5.1 cannot inspect the suspended main thread")
+    name = debug.setlocal(level + 1, index, value)
+  else
+    name = debug.setlocal(co, level + (co == currentThread() and 1 or 0), index, value)
+  end
+  return name
+end
 local threadIDs = setmetatable({ [mainThread] = 1 }, { __mode = "k" })
 local threads = setmetatable({ [1] = mainThread }, { __mode = "v" })
 local nextThreadID = 1
@@ -186,10 +251,10 @@ end
 -- levels because commands add a different number of debugger frames.
 local function frameLocation(frameId)
   if frameId < FRAME_STRIDE then
-    return coroutine.running(), assert(findAnchor(), "no active stack") + frameId - 1
+    return currentThread(), assert(findAnchor(), "no active stack") + frameId - 1
   end
   local co = assert(threads[math.floor(frameId / FRAME_STRIDE)], "unknown coroutine")
-  assert(co ~= coroutine.running() and coroutine.status(co) ~= "dead", "stale frame")
+  assert(co ~= currentThread() and threadStatus(co) ~= "dead", "stale frame")
   return co, frameId % FRAME_STRIDE
 end
 
@@ -216,17 +281,17 @@ local function makeVariable(name, value)
 end
 
 local function collectStack(threadId)
-  local co = coroutine.running()
+  local co = currentThread()
   if threadId then co = threads[threadId] end
   assert(co, "unknown coroutine")
-  local active = co == coroutine.running()
-  if coroutine.status(co) == "dead" then return {} end
+  local active = co == currentThread()
+  if threadStatus(co) == "dead" then return {} end
   local anchor = active and findAnchor() or 0
   if not anchor then return {} end
   local frames = {}
   local level = anchor + 1
   while true do
-    local info = debug.getinfo(co, level, "Slnf")
+    local info = getInfo(co, level, "Slnf")
     if not info then
       break
     end
@@ -258,7 +323,7 @@ local function collectLocals(frameId)
   local vars = {}
   local i = 1
   while true do
-    local name, value = debug.getlocal(co, level, i)
+    local name, value = getLocal(co, level, i)
     if name == nil then
       break
     end
@@ -272,7 +337,7 @@ end
 
 local function collectUpvalues(frameId)
   local co, level = frameLocation(frameId)
-  local info = debug.getinfo(co, level, "f")
+  local info = getInfo(co, level, "f")
   local vars = {}
   if not info then
     return vars
@@ -331,11 +396,11 @@ end
 -- `level` is relative to the caller of findLocal (so +1 inside here).
 -- The last local with the given name wins: inner scopes shadow outer ones.
 local function findLocal(co, level, name)
-  if co == coroutine.running() then level = level + 1 end
+  if co == currentThread() then level = level + 1 end
   local found, foundIndex
   local i = 1
   while true do
-    local n = debug.getlocal(co, level, i)
+    local n = getLocal(co, level, i)
     if n == nil then
       break
     end
@@ -345,7 +410,7 @@ local function findLocal(co, level, name)
     i = i + 1
   end
   if found then
-    local _, v = debug.getlocal(co, level, foundIndex)
+    local _, v = getLocal(co, level, foundIndex)
     return true, v, foundIndex
   end
   return false
@@ -371,13 +436,14 @@ local function lookupVariable(frameId, name)
   if ok then
     return v
   end
-  local info = debug.getinfo(co, level, "f")
+  local info = getInfo(co, level, "f")
   if info then
     ok, v = findUpvalue(info.func, name)
     if ok then
       return v
     end
   end
+  if info and getfenv then return getfenv(info.func)[name] end
   return _G[name]
 end
 
@@ -385,10 +451,10 @@ local function assignVariable(frameId, name, value)
   local co, level = frameLocation(frameId)
   local ok, _, index = findLocal(co, level, name)
   if ok then
-    debug.setlocal(co, level, index, value)
+    setLocal(co, level, index, value)
     return
   end
-  local info = debug.getinfo(co, level, "f")
+  local info = getInfo(co, level, "f")
   if info then
     ok, _, index = findUpvalue(info.func, name)
     if ok then
@@ -396,6 +462,7 @@ local function assignVariable(frameId, name, value)
       return
     end
   end
+  if info and getfenv then getfenv(info.func)[name] = value; return end
   _G[name] = value
 end
 
@@ -414,14 +481,14 @@ end
 -- Returns ok, results (packed table), n
 local function evaluateIn(frameId, expression)
   local env = makeEnv(frameId)
-  local fn, err = load("return " .. expression, "=(eval)", "t", env)
+  local fn, err = compile("return " .. expression, "=(eval)", env)
   if not fn then
-    fn, err = load(expression, "=(eval)", "t", env)
+    fn, err = compile(expression, "=(eval)", env)
   end
   if not fn then
     return false, err
   end
-  local results = table.pack(pcall(fn))
+  local results = packValues(pcall(fn))
   if not results[1] then
     return false, results[2]
   end
@@ -448,7 +515,7 @@ end
 
 local function resume(mode)
   if mode then
-    step = { mode = mode, depth = depth, thread = coroutine.running() }
+    step = { mode = mode, depth = depth, thread = currentThread() }
   else
     step = nil
   end
@@ -457,6 +524,20 @@ local function resume(mode)
 end
 
 local handlers = {}
+local pauseRequested = false
+function handlers.capabilities()
+  return { liveControl = pollStdin ~= nil }
+end
+function handlers.pause()
+  -- A pause command that raced with a breakpoint is already satisfied.
+  if not inDebugger then pauseRequested = true end
+  return {}
+end
+function handlers.updateBreakpoints(cmd)
+  local result = setBreakpoints(cmd)
+  send({ event = "breakpointsChanged", file = cmd.file, breakpoints = result.breakpoints })
+  return result
+end
 
 handlers.setBreakpoints = setBreakpoints
 
@@ -485,8 +566,8 @@ end
 function handlers.threads()
   local result = {}
   for id, co in pairs(threads) do
-    if coroutine.status(co) ~= "dead" then
-      result[#result + 1] = { id = id, name = id == 1 and "main" or ("coroutine " .. id .. " (" .. coroutine.status(co) .. ")") }
+    if threadStatus(co) ~= "dead" then
+      result[#result + 1] = { id = id, name = id == 1 and "main" or ("coroutine " .. id .. " (" .. threadStatus(co) .. ")") }
     end
   end
   table.sort(result, function(a, b) return a.id < b.id end)
@@ -543,14 +624,17 @@ function handlers.evaluate(cmd)
   return { result = table.concat(parts, ", "), type = "multiple", variablesReference = 0 }
 end
 
--- Read and answer commands (blocking) until one resumes execution.
-local function commandLoop()
+-- Running commands are deliberately restricted to control and breakpoint updates.
+local function commandLoop(running)
+  local processed = 0
   while true do
+    if running and #queuedCommands == 0 and not pollStdin() then return end
     local cmd = readCommand()
     if not cmd then
       os.exit(0, true)
     end
     local handler = handlers[cmd.cmd]
+    if running and cmd.cmd ~= "pause" and cmd.cmd ~= "updateBreakpoints" then handler = nil end
     local reply = { id = cmd.id }
     local result
     if not handler then
@@ -569,18 +653,19 @@ local function commandLoop()
     if cmd.id ~= nil then
       send(reply)
     end
-    if result == RESUME then
-      return
-    end
+    if result == RESUME then return end
+    processed = processed + 1
+    if running and processed >= 32 then return end
   end
 end
 
 local function pause(reason, info, text)
   inDebugger = true
   step = nil
+  pauseRequested = false
   send({
     event = "stopped",
-    threadId = registerThread(coroutine.running()),
+    threadId = registerThread(currentThread()),
     reason = reason,
     file = sourcePath(info.source),
     line = info.currentline,
@@ -615,9 +700,9 @@ local function shouldStop(path, line)
   if step then
     if step.mode == "in" then
       return "step"
-    elseif step.mode == "over" and step.thread == coroutine.running() and depth <= step.depth then
+    elseif step.mode == "over" and step.thread == currentThread() and depth <= step.depth then
       return "step"
-    elseif step.mode == "out" and step.thread == coroutine.running() and depth < step.depth then
+    elseif step.mode == "out" and step.thread == currentThread() and depth < step.depth then
       return "step"
     end
   end
@@ -638,12 +723,19 @@ local function stackDepth()
   return count
 end
 
+local pollTicks = 0
 function hook(event, line)
-  if inDebugger or event ~= "line" or (not step and next(breakpoints) == nil) then
-    return
+  if inDebugger then return end
+  if pollStdin then
+    pollTicks = pollTicks + 1
+    if event == "count" or pollTicks >= 100 then
+      pollTicks = 0
+      commandLoop(true)
+    end
   end
+  if not pauseRequested and (event ~= "line" or (not step and next(breakpoints) == nil)) then return end
 
-  local info = debug.getinfo(2, "S")
+  local info = debug.getinfo(2, "Sl")
   if info.source == SELF_SOURCE then
     return
   end
@@ -656,10 +748,10 @@ function hook(event, line)
   if step and step.mode ~= "in" then
     depth = stackDepth()
   end
-  local reason = shouldStop(path, line)
+  local reason = pauseRequested and "pause" or shouldStop(path, line)
   if reason then
     depth = stackDepth()
-    info.currentline = line
+    info.currentline = line or info.currentline
     pause(reason, info)
   end
 end
@@ -670,21 +762,21 @@ local function installCoroutineHooks()
   coroutine.create = function(fn)
     local co = create(fn)
     registerThread(co)
-    debug.sethook(co, hook, "l")
+    debug.sethook(co, hook, "l", pollStdin and 1000 or 0)
     return co
   end
   coroutine.resume = function(co, ...)
-    local result = table.pack(resumeCoroutine(co, ...))
+    local result = packValues(resumeCoroutine(co, ...))
     -- Stepping past yield or the end of a coroutine resumes in its caller.
     if step and step.thread == co then
       step = { mode = "in" }
     end
-    return table.unpack(result, 1, result.n)
+    return unpackValues(result, 1, result.n)
   end
   coroutine.wrap = function(fn)
     local co = coroutine.create(fn)
     return function(...)
-      local result = table.pack(coroutine.resume(co, ...))
+      local result = packValues(coroutine.resume(co, ...))
       if not result[1] then
         -- Lua 5.2/5.3 have neither coroutine.close nor to-be-closed variables.
         if coroutine.close then
@@ -692,7 +784,7 @@ local function installCoroutineHooks()
         end
         error(result[2], 2)
       end
-      return table.unpack(result, 2, result.n)
+      return unpackValues(result, 2, result.n)
     end
   end
 end
@@ -713,7 +805,7 @@ local function main()
     io.stderr:write("usage: lua debugger.lua <script.lua> [args...]\n")
     os.exit(2)
   end
-  local scriptArgs = { table.unpack(arg, 2) }
+  local scriptArgs = { unpackValues(arg, 2) }
 
   -- Keep interactive output visible without replacing Lua file methods.
   io.stdout:setvbuf("no")
@@ -764,10 +856,12 @@ local function main()
   end
 
   if not noDebug then
+    -- LuaJIT machine-code loops do not reliably enter instruction hooks.
+    if jit then jit.off(); jit.flush() end
     installCoroutineHooks()
-    debug.sethook(hook, "l")
+    debug.sethook(hook, "l", pollStdin and 1000 or 0)
   end
-  local ok, traceback = xpcall(chunk, onError, table.unpack(scriptArgs))
+  local ok, traceback = xpcall(function() return chunk(unpackValues(scriptArgs)) end, onError)
   debug.sethook()
 
   if not ok then

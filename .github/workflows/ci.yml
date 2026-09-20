@@ -112,6 +112,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build test Lua with a custom DLL name (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'lua-5.4.9.tar.gz'
+          Invoke-WebRequest 'https://www.lua.org/ftp/lua-5.4.9.tar.gz' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6') { throw 'Lua checksum mismatch' }
+          tar -xzf $archive -C $env:RUNNER_TEMP
+          $src = Join-Path $env:RUNNER_TEMP 'lua-5.4.9/src'
+          $cc = if ($env:CC) { $env:CC } else { 'gcc' }
+          $sources = Get-ChildItem "$src/*.c" | Where-Object { $_.Name -notin @('lua.c', 'luac.c') } | ForEach-Object { $_.FullName }
+          Push-Location $src
+          & $cc -O2 -shared -DLUA_BUILD_AS_DLL @sources '-Wl,--out-implib,liblua-host.dll.a' -o lua-host.dll
+          if ($LASTEXITCODE -ne 0) { throw 'Lua DLL build failed' }
+          & $cc -O2 -DLUA_BUILD_AS_DLL lua.c -L. -llua-host -o lua.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Lua executable build failed' }
+          Pop-Location
+          "LUA_TEST_BINARY=$src/lua.exe" >> $env:GITHUB_ENV
+          'LUA_TEST_VERSION=5.4.9' >> $env:GITHUB_ENV
+          'LUA_TEST_NATIVE_REQUIRED=1' >> $env:GITHUB_ENV
+
       - name: Check types
         run: npm run check
 
@@ -127,9 +148,7 @@ jobs:
       - name: Smoke test the language server
         run: npm run test:lsp
 
-      # No Lua 5.4 package on the Windows runner; the Lua side is covered on the other platforms.
       - name: Smoke test the debug adapter
-        if: runner.os != 'Windows'
         run: npm run test:dap
 
       # `e2e` runs the extension in a real VS Code; one runner per OS.
@@ -161,6 +180,8 @@ jobs:
       matrix:
         include:
           # Pinned official source releases and SHA-256 from https://www.lua.org/ftp/.
+          - lua: '5.1.5'
+            sha256: 2640fc56a795f29d28ef15e13c34a47e223960b0240e8cb0a82d9b0738695333
           - lua: '5.2.4'
             sha256: b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b
           - lua: '5.3.6'
@@ -171,6 +192,7 @@ jobs:
             sha256: 1c4b4068d67061f2a2231ad2b5422e77acea1487ea9890f6320af614f4373dce
     env:
       LUA_TEST_VERSION: ${{ matrix.lua }}
+      LUA_TEST_NATIVE_REQUIRED: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -198,14 +220,28 @@ jobs:
           curl --fail --location --retry 3 "https://www.lua.org/ftp/$archive" -o "$archive"
           echo "$LUA_SHA256  $archive" | sha256sum --check --strict
           tar -xzf "$archive"
-          # Generic needs only the C compiler and libm, avoiding readline dependencies.
-          make -C "lua-$LUA_TEST_VERSION" -j2 generic
+          # Enable dynamic modules and export the host API without readline.
+          make -C "lua-$LUA_TEST_VERSION/src" -j2 all MYCFLAGS=-DLUA_USE_DLOPEN MYLIBS=-ldl MYLDFLAGS=-Wl,-E
           lua_binary="$RUNNER_TEMP/lua-$LUA_TEST_VERSION/src/lua"
           "$lua_binary" -v
           echo "LUA_TEST_BINARY=$lua_binary" >> "$GITHUB_ENV"
 
+      - name: Build native polling helper
+        run: node scripts/build-native.mjs
+
       - name: Test debugger and language server with selected Lua (race detector enabled)
+        if: matrix.lua != '5.1.5'
         run: go test -race -tags=integration -count=1 -timeout=60s -v ./internal/dap ./internal/lsp
+
+      - name: Test Lua 5.1 debugger compatibility
+        if: matrix.lua == '5.1.5'
+        run: go test -race -tags=integration -count=1 -timeout=60s -v ./internal/dap
+
+      - name: Test pure Lua fallback
+        env:
+          LUA_DEVTOOLS_NATIVE: 'off'
+          LUA_TEST_NATIVE_REQUIRED: '0'
+        run: go test -race -tags=integration -count=1 -timeout=60s ./internal/dap
 
       - name: Build debug adapter
         run: |
@@ -214,3 +250,36 @@ jobs:
 
       - name: Smoke test DAP with selected Lua
         run: node scripts/dap-smoke.mjs
+
+  luajit-compatibility:
+    name: LuaJIT 2.1 compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Build pinned LuaJIT and native polling helper
+        shell: bash
+        run: |
+          commit=c6ffc141a8762b41703f9287d63d93622a13dd8f
+          curl --fail --location --retry 3 "https://codeload.github.com/LuaJIT/LuaJIT/tar.gz/$commit" -o "$RUNNER_TEMP/luajit.tar.gz"
+          echo "6e5fec07750add912e7c3eae0c194d24cd6d023714e1f04a0298a5b4819e4457  $RUNNER_TEMP/luajit.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/luajit.tar.gz" -C "$RUNNER_TEMP"
+          make -C "$RUNNER_TEMP/LuaJIT-$commit" -j2
+          echo "LUA_TEST_BINARY=$RUNNER_TEMP/LuaJIT-$commit/src/luajit" >> "$GITHUB_ENV"
+          node scripts/build-native.mjs
+      - name: Test LuaJIT debugger and native control
+        env:
+          LUA_TEST_NATIVE_REQUIRED: '1'
+        run: go test -race -tags=integration -count=1 -timeout=60s -v ./internal/dap
+      - name: Test LuaJIT pure Lua fallback
+        env:
+          LUA_DEVTOOLS_NATIVE: 'off'
+        run: go test -race -tags=integration -count=1 -timeout=60s ./internal/dap

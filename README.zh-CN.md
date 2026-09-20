@@ -16,9 +16,15 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 - 编辑器右上角 Run / Debug 按钮；无 launch.json 时对当前 `.lua` 文件直接 F5。
 - 支持 `coroutine.create` / `coroutine.wrap` 中的断点和单步；提供协程列表，可查看挂起协程的调用栈、局部变量和 upvalue，并在选中栈帧中求值或赋值。
 - 成员补全支持表别名、表形式的 `__index`、简单函数返回的表字面量，以及本地 `require` 模块的顶层导出。
-- 支持 Lua 5.2–5.5 调试；在受信任的工作区中，语法检查和标准库补全跟随所选解释器版本。
+- 支持 Lua 5.1–5.5 和 LuaJIT 2.1 调试；在受信任的工作区中，语法检查和标准库补全跟随 Lua 5.2–5.5 解释器版本。
 - 程序 stdout/stderr 与调试协议分离，支持直接 `io.stdout:write` 及不带换行的输出。
 - 中英文界面。
+
+## 原生轮询辅助模块
+
+扩展不自带 Lua 解释器。每个 OS/架构安装包包含一个可选的 C 模块，仅使用四个稳定的 Lua C API，不链接指定版本的 liblua。macOS/Linux 从宿主进程解析符号；Windows 从已加载模块查找导出，不依赖 DLL 名称。解释器必须允许动态加载并导出所需符号；Windows 检测到多个 Lua API 提供者时也会回退。模块缺失或加载失败时自动使用纯 Lua 调试。
+
+模块提供 stdin 就绪检测，让调试器在运行中接收暂停和断点修改。Lua 5.1 / LuaJIT 的语言服务目前仍回退到内置 Lua 5.4 分析；解释器版本感知的诊断和标准库补全继续支持 Lua 5.2–5.5。
 
 ## 测试 CodeLens
 
@@ -33,7 +39,7 @@ Busted 支持 `describe`、`context`、`insulate`、`expose` 下的 `it`、`spec
 ## 要求
 
 - VS Code ≥ 1.91
-- 运行脚本的机器上装有 Lua 5.2、5.3、5.4 或 5.5（`brew install lua@5.4`、`apt install lua5.4` 等）
+- 运行脚本的机器上装有 Lua 5.1–5.5 或 LuaJIT 2.1（`brew install lua@5.4`、`apt install lua5.4` 等）
 
 ## 配置
 
@@ -71,9 +77,9 @@ npm run test:e2e    # 在真实 VS Code 里跑扩展（首次会下载 VS Code�
 npm run package     # 平台专属 VSIX，输出在 vscode/
 ```
 
-CI 单独运行 Linux 兼容性矩阵，覆盖 **Lua 5.2.4、5.3.6、5.4.9、5.5.1**。各版本从校验 SHA-256 的官方源码构建，运行启用 race detector 的 Go DAP、LSP 集成测试和 DAP 冒烟测试。测试会显式核对所选解释器的版本；解释器不存在或版本不匹配会直接失败。
+CI 单独运行 Linux 兼容性矩阵，覆盖 **Lua 5.1.5、5.2.4、5.3.6、5.4.9、5.5.1**。各版本从校验 SHA-256 的官方源码构建，运行启用 race detector 的 Go DAP 集成测试和 DAP 冒烟测试，Lua 5.2–5.5 另运行 LSP 集成测试。各版本验证原生轮询及纯 Lua 回退，LuaJIT 2.1 使用单独的固定提交测试任务。测试会显式核对所选解释器的版本；解释器不存在或版本不匹配会直接失败。
 
-平台任务构建并打包全部六种目标。Linux 和 macOS 运行 DAP 测试；Linux x64 和 macOS ARM64 运行真实 VS Code 端到端测试。Windows 任务目前运行 Go 测试和 LSP 冒烟测试，不安装 Lua，也不执行 Lua DAP 集成测试。
+平台任务构建并打包全部六种目标。Linux、macOS 和 Windows 均运行 DAP 测试；Windows 构建自定义 DLL 名称的 Lua，验证动态 API 解析。Linux x64 和 macOS ARM64 运行真实 VS Code 端到端测试。
 
 本地复现指定版本：
 
@@ -111,8 +117,8 @@ CI 打包 darwin-x64/arm64、linux-x64/arm64 和 win32-x64/arm64。Windows ARM64
 
 ## 已知限制
 
-- **运行中控制**：不支持主动暂停；断点变更在下一次暂停时才生效。不支持程序交互式标准输入。
-- **协程执行控制**：不能对非当前停止的协程单步或独立恢复其他挂起协程。被 `coroutine.resume` 捕获的错误不会在出错协程内暂停。不支持替换调试器的 hook。
+- **运行中控制**：主动暂停和断点更新在下一个 Lua 调试 hook 处理，无法中断阻塞中的 C 函数或系统调用。原生模块加载失败时，主动暂停不可用，断点变更延迟到下次暂停。不支持程序交互式标准输入。
+- **协程执行控制**：不能对非当前停止的协程单步或独立恢复其他挂起协程。被 `coroutine.resume` 捕获的错误不会在出错协程内暂停。不支持替换调试器的 hook。Lua 5.1 / LuaJIT 暂停在协程中时无法检查挂起的主线程；LuaJIT 调试期间关闭 JIT 编译。
 - **接入方式**：不支持 attach 到已有进程，也不支持嵌入式 Lua。
 - **Lua 5.5 新声明语法**：作用域、跳转和大纲仍使用 Lua 5.4 的语法树，对 Lua 5.5 新增声明的语义支持尚不完整。
 - **复杂类型推断**：不合并控制流，不推断函数形式的 `__index` 或复杂函数返回值。

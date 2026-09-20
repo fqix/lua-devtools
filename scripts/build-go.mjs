@@ -9,6 +9,7 @@ import { copyFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { buildNative } from './build-native.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXT = join(ROOT, 'vscode');
@@ -27,6 +28,7 @@ const run = (args, env = {}) =>
   execFileSync('go', args, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, ...env } });
 
 if (values.test) {
+  buildNative();
   run(['vet', './...']);
   // Go does not support the race detector on windows/arm64. Keep it on
   // every other published platform, including the Windows x64 job.
@@ -44,6 +46,7 @@ for (const target of values.target?.length ? values.target : [HOST]) {
   const outDir = join(EXT, 'bin', target);
   mkdirSync(outDir, { recursive: true });
   console.log(`Building Go servers for ${target}`);
+  buildNative(target);
   run(['build', '-trimpath', '-ldflags', `-s -w -X github.com/fqix/lua-devtools/internal/lsp.Version=${VERSION}`, '-o', outDir + '/', './cmd/...'], {
     GOOS: GOOS[platform],
     GOARCH: GOARCH[arch],

@@ -20,17 +20,19 @@ import (
 //
 // Protocol: commands go to stdin; replies and events use a private session file.
 // stdout and stderr carry only program output.
-// Lua only reads stdin while paused, so breakpoint changes made while running are
-// queued and flushed on the next `stopped` event.
+// With the optional native helper, Lua also reads commands from debug hooks.
+// Otherwise running breakpoint changes are flushed on the next stop.
 type Runtime struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	commands chan []byte // one writer; bounded so a blocked native call cannot stall DAP
 
 	mu                 sync.Mutex
 	nextID             int
 	pending            map[int]chan reply
 	paused             bool
 	activeThread       int
+	liveControl        bool
 	pendingBreakpoints map[string][]SourceBreakpoint
 	closed             bool
 	locale             string
@@ -104,15 +106,16 @@ type message struct {
 	Body  json.RawMessage `json:"body"`
 	Error *string         `json:"error"`
 
-	ThreadID int    `json:"threadId"`
-	Event    string `json:"event"`
-	Path     string `json:"path"` // resolvePath
-	Reason   string `json:"reason"`
-	File     string `json:"file"`
-	Line     int    `json:"line"`
-	Text     string `json:"text"`
-	Category string `json:"category"`
-	ExitCode int    `json:"exitCode"`
+	ThreadID    int                  `json:"threadId"`
+	Event       string               `json:"event"`
+	Path        string               `json:"path"` // resolvePath
+	Reason      string               `json:"reason"`
+	File        string               `json:"file"`
+	Line        int                  `json:"line"`
+	Text        string               `json:"text"`
+	Category    string               `json:"category"`
+	ExitCode    int                  `json:"exitCode"`
+	Breakpoints []VerifiedBreakpoint `json:"breakpoints"`
 }
 
 type LaunchOptions struct {
@@ -128,6 +131,7 @@ type LaunchOptions struct {
 
 func NewRuntime() *Runtime {
 	return &Runtime{
+		commands:           make(chan []byte, 64),
 		nextID:             1,
 		pending:            map[int]chan reply{},
 		pendingBreakpoints: map[string][]SourceBreakpoint{},
@@ -178,6 +182,19 @@ func (r *Runtime) Start(opts LaunchOptions) error {
 	r.mu.Unlock()
 
 	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			case line := <-r.commands:
+				if _, err := stdin.Write(line); err != nil {
+					r.Dispose()
+					return
+				}
+			}
+		}
+	}()
 	var waitErr error
 	go func() {
 		waitErr = cmd.Wait()
@@ -207,6 +224,25 @@ func (r *Runtime) Start(opts LaunchOptions) error {
 		r.Events <- Event{Kind: "exited", ExitCode: code}
 		r.Events <- Event{Kind: "exit", ExitCode: code}
 	}()
+	// Negotiate before launch completes; a missing helper is a supported fallback.
+	ready := make(chan error, 1)
+	var capabilities struct {
+		LiveControl bool `json:"liveControl"`
+	}
+	go func() { ready <- r.call("capabilities", nil, &capabilities) }()
+	select {
+	case err := <-ready:
+		if err != nil {
+			r.Dispose()
+			return err
+		}
+	case <-time.After(5 * time.Second):
+		r.Dispose()
+		return errors.New("Lua debugger startup timed out")
+	}
+	r.mu.Lock()
+	r.liveControl = capabilities.LiveControl
+	r.mu.Unlock()
 	go r.flushPendingBreakpoints()
 	return nil
 }
@@ -235,7 +271,7 @@ func (r *Runtime) send(cmd string, payload map[string]any) (json.RawMessage, err
 		msg[k] = v
 	}
 	line, _ := json.Marshal(msg)
-	_, err := r.stdin.Write(append(line, '\n'))
+	err := r.queueCommand(line)
 	r.mu.Unlock()
 	if err != nil {
 		r.mu.Lock()
@@ -275,6 +311,9 @@ func (r *Runtime) Resume(cmd string, payload map[string]any) error {
 		return fmt.Errorf("only the currently stopped coroutine can be stepped")
 	}
 	r.paused = false
+	if payload["noDebug"] == true {
+		r.liveControl = false
+	}
 	r.mu.Unlock()
 	return r.call(cmd, payload, nil)
 }
@@ -283,11 +322,26 @@ func (r *Runtime) SetBreakpoints(file string, bps []SourceBreakpoint) ([]Verifie
 	r.mu.Lock()
 	paused := r.paused && r.stdin != nil
 	if !paused {
-		r.pendingBreakpoints[file] = bps
+		live := r.liveControl && r.stdin != nil && !r.closed
+		if !live {
+			r.pendingBreakpoints[file] = bps
+		}
 		r.mu.Unlock()
+		if live {
+			if bps == nil {
+				bps = []SourceBreakpoint{}
+			}
+			if err := r.notify(map[string]any{"cmd": "updateBreakpoints", "file": file, "breakpoints": bps}); err != nil {
+				return nil, err
+			}
+		}
 		out := make([]VerifiedBreakpoint, len(bps))
 		for i, bp := range bps {
-			out[i] = VerifiedBreakpoint{Line: bp.Line, Verified: false, Message: i18n.T(r.locale, "dap.breakpointsQueued")}
+			key := "dap.breakpointsQueued"
+			if live {
+				key = "dap.breakpointsPending"
+			}
+			out[i] = VerifiedBreakpoint{Line: bp.Line, Verified: false, Message: i18n.T(r.locale, key)}
 		}
 		return out, nil
 	}
@@ -301,6 +355,43 @@ func (r *Runtime) SetBreakpoints(file string, bps []SourceBreakpoint) ([]Verifie
 	}
 	err := r.call("setBreakpoints", map[string]any{"file": file, "breakpoints": bps}, &body)
 	return body.Breakpoints, err
+}
+
+// notify queues control without waiting for a hook: a long C call must not block
+// the DAP request loop from handling disconnect/terminate.
+func (r *Runtime) notify(msg map[string]any) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stdin == nil || r.closed {
+		return errors.New("Lua process is not running")
+	}
+	line, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	return r.queueCommand(line)
+}
+
+func (r *Runtime) queueCommand(line []byte) error {
+	select {
+	case r.commands <- append(line, '\n'):
+		return nil
+	default:
+		return errors.New("Lua debugger command queue is full")
+	}
+}
+
+func (r *Runtime) Pause() error {
+	r.mu.Lock()
+	paused, live := r.paused, r.liveControl
+	r.mu.Unlock()
+	if paused {
+		return nil
+	}
+	if !live {
+		return errors.New(i18n.T(r.locale, "dap.pauseUnavailable"))
+	}
+	return r.notify(map[string]any{"cmd": "pause"})
 }
 
 type ThreadInfo struct {
@@ -389,6 +480,8 @@ func (r *Runtime) handleMessage(msg message) {
 		return
 	}
 	switch msg.Event {
+	case "breakpointsChanged":
+		r.Events <- Event{Kind: "breakpointsChanged", BreakpointFile: msg.File, Breakpoints: msg.Breakpoints}
 	case "stopped":
 		r.mu.Lock()
 		r.activeThread = msg.ThreadID
@@ -409,7 +502,9 @@ func (r *Runtime) handleMessage(msg message) {
 		line, _ := json.Marshal(map[string]string{"path": msg.Path, "resolvedPath": NormalizePath(msg.Path)})
 		r.mu.Lock()
 		if r.stdin != nil && !r.closed {
-			_, _ = r.stdin.Write(append(line, '\n'))
+			if err := r.queueCommand(line); err != nil {
+				r.Dispose()
+			}
 		}
 		r.mu.Unlock()
 	}

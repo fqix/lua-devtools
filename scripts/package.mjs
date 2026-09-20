@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Produce platform-specific VSIX files: `node scripts/package.mjs [--all | --target darwin-arm64 ...]`.
-// Each VSIX carries only its own Go binaries under bin/. Output lands in vscode/.
+// Each VSIX carries its Go binaries and optional native polling module under bin/.
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -26,7 +26,10 @@ copyFileSync(join(ROOT, 'LICENSE'), join(EXT, 'LICENSE'));
 copyFileSync(join(ROOT, 'README.md'), join(EXT, 'README.md'));
 for (const target of targets) {
   const source = join(EXT, 'bin', target);
-  if (!existsSync(source)) run('node', [join(ROOT, 'scripts', 'build-go.mjs'), '--target', target], { cwd: ROOT });
+  const helper = `lua-devtools-native.${target.startsWith('win32-') ? 'dll' : 'so'}`;
+  if (!existsSync(join(source, helper))) run('node', [join(ROOT, 'scripts', 'build-go.mjs'), '--target', target], { cwd: ROOT });
+  // Do not accidentally include a previously staged helper for a different OS.
+  for (const suffix of ['so', 'dll']) rmSync(join(EXT, 'bin', `lua-devtools-native.${suffix}`), { force: true });
   const staged = [];
   try {
     for (const name of readdirSync(source)) {

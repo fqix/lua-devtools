@@ -4,6 +4,8 @@
 !bin/lua-dap.exe
 !bin/lua-lsp
 !bin/lua-lsp.exe
+!bin/lua-devtools-native.so
+!bin/lua-devtools-native.dll
 !lua/**
 !README.md
 !CHANGELOG.md
