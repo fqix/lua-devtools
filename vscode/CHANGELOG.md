@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.0 — 2026-09-20
+
+### Added
+
+- Discover and select Lua interpreters from the status bar; use the selected interpreter for running, debugging, syntax checks and standard-library completion.
+- Lua 5.1 and LuaJIT 2.1 support alongside Lua 5.2–5.5.
+- Lua 5.5 declaration navigation and outline support, including lexical `global` declarations, attributes and named varargs.
+- Go to implementations of statically resolved local module functions, including aliases, methods, directory modules and unsaved sources.
+- Read-only JSON views for paused table variables. Nested data retains numeric precision; function, userdata and thread values use type markers. Snapshots enforce depth, size and value limits without invoking table metamethods.
+- Debugging examples for coroutines, blocking sleep, local and installed modules, and live runtime control.
+
+### Changed
+
+- A version-neutral native polling helper enables pause requests and breakpoint updates while Lua is running, with a pure Lua fallback when unavailable. Blocking C calls still wait until Lua execution resumes.
+- Build tooling uses Node.js 24 LTS.
+
+### Fixed
+
+- Handle Windows Lua text-output line endings.
+- Require all runtime artifacts before packaging platform VSIX files.
+- Allow store publication retries using existing release assets.
+
 ## 0.1.0
 
 - Lua debugger: breakpoints, conditional breakpoints, stepping, call stack, locals/upvalues, table expansion, evaluate, pause on runtime errors (`bin/lua-dap` + `lua/debugger.lua`).
