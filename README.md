@@ -107,6 +107,8 @@ CI packages darwin-x64/arm64, linux-x64/arm64, and win32-x64/arm64. Windows ARM6
 
 Bump `version` in `vscode/package.json`, tag `v<version>` and publish a GitHub Release. `release.yml` reuses the CI build, publishes the VSIX packages and attaches them to the release. Required repository configuration: environment `marketplace-publish` with secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` (Marketplace workload identity federation) and `OVSX_PAT`.
 
+To retry publishing, open Actions → Release → Run workflow and enter an existing tag (for example, `v0.1.0`). The retry uses the six platform VSIX assets from that release and skips versions already published to each store.
+
 ## Known limitations
 
 - **Runtime control:** no pause request while running; breakpoint changes take effect at the next stop. Interactive program stdin is unavailable.

@@ -107,6 +107,8 @@ CI 打包 darwin-x64/arm64、linux-x64/arm64 和 win32-x64/arm64。Windows ARM64
 
 修改 `vscode/package.json` 的 `version`，打 `v<version>` 标签并发布 GitHub Release。`release.yml` 复用 CI 构建，发布 VSIX 并挂到 Release。仓库需配置环境 `marketplace-publish` 及密钥 `AZURE_CLIENT_ID`、`AZURE_TENANT_ID`（Marketplace 工作负载身份联合）和 `OVSX_PAT`。
 
+发布失败后，可在 Actions → Release → Run workflow 中填写已有标签（如 `v0.1.0`）重试。重试使用该 Release 的六个平台 VSIX 附件，并跳过商店中已发布的版本。
+
 ## 已知限制
 
 - **运行中控制**：不支持主动暂停；断点变更在下一次暂停时才生效。不支持程序交互式标准输入。
