@@ -13,5 +13,8 @@
   "Enter interpreter path…": "Enter interpreter path…",
   "Use automatic detection": "Use automatic detection",
   "Currently selected": "Currently selected",
-  "Enter an absolute executable path or a command on PATH.": "Enter an absolute executable path or a command on PATH."
+  "Enter an absolute executable path or a command on PATH.": "Enter an absolute executable path or a command on PATH.",
+  "Pause Lua debugging and right-click a table in Variables.": "Pause Lua debugging and right-click a table in Variables.",
+  "Invalid table snapshot response.": "Invalid table snapshot response.",
+  "Cannot view Lua table: {0}": "Cannot view Lua table: {0}"
 }

@@ -17,5 +17,6 @@
   "launch.packagePath": "Extra Lua module search patterns added to LUA_PATH before the interpreter defaults, e.g. \"${workspaceFolder}/src/?.lua\".",
   "launch.packageCPath": "Extra C module search patterns added to LUA_CPATH before the interpreter defaults, e.g. \"${workspaceFolder}/lib/?.so\".",
   "launch.env": "Environment variables for the Lua process.",
-  "command.selectInterpreter": "Lua DevTools: Select Interpreter"
+  "command.selectInterpreter": "Lua DevTools: Select Interpreter",
+  "command.viewTableJSON": "View Table as JSON"
 }

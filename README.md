@@ -28,6 +28,10 @@ No Lua interpreter is bundled. Each OS/architecture package includes one optiona
 
 The module checks stdin readiness so the debugger can receive pause requests and breakpoint updates while running. Interpreter-aware diagnostics and standard-library completion support Lua 5.1–5.5 and LuaJIT 2.1, including Lua 5.1 environment functions and LuaJIT’s `bit` / `jit` libraries.
 
+## Table JSON view
+
+While paused, right-click a `table` in the Variables pane and choose **View Table as JSON**. The view opens a read-only, foldable JSON snapshot. Nested tables are read directly, without the Variables pane’s 200-entry limit or invoking table metamethods. Consecutive 1-based numeric keys become arrays, string keys become objects, and empty tables become `{}`. Function/userdata/thread values are represented by type-marker strings such as `"<function>"`; these are display placeholders, not restorable values. Circular references, mixed/sparse keys, non-finite numbers and binary strings produce an error. Snapshots are limited to 32 levels, 10,000 values and 512 KiB of compact JSON; oversized snapshots show an error. Snapshots remain unchanged after execution resumes.
+
 ## Test CodeLens
 
 LuaUnit tests importing `luaunit` get **Run Test / Debug Test** above global `test*` / `Test*` functions and methods such as `function TestFoo:testBar()`. The test file must call the LuaUnit runner and accept its normal command-line arguments (for example, `os.exit(lu.LuaUnit.run())`). Each action passes the exact test name, retaining setup/teardown behavior.
@@ -109,7 +113,7 @@ The CodeLens end-to-end tests require `luaunit` 3.4 and `busted` 2.2.0 installed
 | `internal/analysis` | tree-sitter parsing, scopes / symbols, position conversion (unit tested) |
 | `internal/i18n` | Messages of the Go servers (en, zh-cn) |
 | `vscode/` | The VS Code extension: `src/`, `lua/debugger.lua` (runs inside the debuggee), `l10n/`, `package.nls*.json`, e2e tests in `src/e2e/` |
-| `vscode/lua/json.lua` | vendored [rxi/json.lua](https://github.com/rxi/json.lua) (MIT) |
+| `vscode/lua/json.lua` | vendored [rxi/json.lua](https://github.com/rxi/json.lua) (MIT), with local encoder options |
 | `scripts/` | `build-go.mjs`, `package.mjs`, `e2e.mjs`, `*-smoke.mjs` |
 | `.github/workflows` | CI builds and packages every platform; a published GitHub Release publishes to the Marketplace and Open VSX |
 

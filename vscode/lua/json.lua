@@ -22,13 +22,12 @@
 -- SOFTWARE.
 --
 
+-- Locally extended encoder with optional strict, bounded table snapshots.
 local json = { _version = "0.1.2" }
 
 -------------------------------------------------------------------------------
 -- Encode
 -------------------------------------------------------------------------------
-
-local encode
 
 local escape_char_map = {
   [ "\\" ] = "\\",
@@ -51,90 +50,94 @@ local function escape_char(c)
 end
 
 
-local function encode_nil(val)
-  return "null"
+local function validUTF8(s)
+  local i = 1
+  while i <= #s do
+    local b = s:byte(i)
+    local count = b < 128 and 1 or b >= 194 and b <= 223 and 2 or b >= 224 and b <= 239 and 3 or b >= 240 and b <= 244 and 4
+    if not count or i + count - 1 > #s then return false end
+    for j = 1, count - 1 do
+      local c = s:byte(i + j)
+      if c < 128 or c > 191 then return false end
+    end
+    local second = s:byte(i + 1)
+    if (b == 224 and second < 160) or (b == 237 and second > 159) or
+       (b == 240 and second < 144) or (b == 244 and second > 143) then return false end
+    i = i + count
+  end
+  return true
 end
 
-
-local function encode_table(val, stack)
-  local res = {}
-  stack = stack or {}
-
-  -- Circular reference?
-  if stack[val] then error("circular reference") end
-
-  stack[val] = true
-
-  if rawget(val, 1) ~= nil or next(val) == nil then
-    -- Treat as array -- check keys are valid and it is not sparse
-    local n = 0
-    for k in pairs(val) do
-      if type(k) ~= "number" then
-        error("invalid table: mixed or invalid key types")
+-- Optional snapshot policy; defaults retain the protocol's empty arrays and precision.
+-- Raw traversal avoids invoking debuggee metamethods in either mode.
+function json.encode(value, options)
+  options = options or {}
+  local active, parts, nodes, bytes = {}, {}, 0, 0
+  local function emit(text)
+    bytes = bytes + #text
+    if options.maxBytes and bytes > options.maxBytes then
+      error('JSON exceeds ' .. string.format('%g', options.maxBytes / 1024) .. ' KiB')
+    end
+    parts[#parts + 1] = text
+  end
+  local function stringValue(text)
+    if options.maxBytes and #text > options.maxBytes then
+      error('JSON exceeds ' .. string.format('%g', options.maxBytes / 1024) .. ' KiB')
+    end
+    if options.validateUTF8 and not validUTF8(text) then error('JSON requires UTF-8 strings; binary strings cannot be exported') end
+    emit('"' .. text:gsub('[%z\1-\31\\"]', escape_char) .. '"')
+  end
+  local visit
+  visit = function(v, depth)
+    nodes = nodes + 1
+    if options.maxValues and nodes > options.maxValues then error('JSON exceeds ' .. options.maxValues .. ' values') end
+    if options.maxDepth and depth > options.maxDepth then error('JSON exceeds ' .. options.maxDepth .. ' levels') end
+    local kind = type(v)
+    if kind == 'nil' then emit('null')
+    elseif kind == 'boolean' then emit(v and 'true' or 'false')
+    elseif kind == 'string' then stringValue(v)
+    elseif kind == 'number' then
+      if v ~= v or v == math.huge or v == -math.huge then error('JSON cannot represent NaN or infinity') end
+      if options.preciseNumbers and math.type and math.type(v) == 'integer' then emit(tostring(v))
+      else emit((string.format(options.preciseNumbers and '%.17g' or '%.14g', v):gsub(',', '.'))) end
+    elseif kind == 'table' then
+      if active[v] then error('JSON cannot represent circular table references') end
+      active[v] = true
+      local keys, numeric, maximum = {}, true, 0
+      for key in next, v do
+        if options.maxValues and #keys >= options.maxValues then error('JSON exceeds ' .. options.maxValues .. ' table entries') end
+        keys[#keys + 1] = key
+        if type(key) == 'number' and key >= 1 and key % 1 == 0 then maximum = math.max(maximum, key)
+        else numeric = false end
       end
-      n = n + 1
-    end
-    if n ~= #val then
-      error("invalid table: sparse array")
-    end
-    -- Encode
-    for i, v in ipairs(val) do
-      table.insert(res, encode(v, stack))
-    end
-    stack[val] = nil
-    return "[" .. table.concat(res, ",") .. "]"
-
-  else
-    -- Treat as an object
-    for k, v in pairs(val) do
-      if type(k) ~= "string" then
-        error("invalid table: mixed or invalid key types")
+      if numeric and maximum == #keys and (#keys > 0 or not options.emptyTableAsObject) then
+        emit('[')
+        for i = 1, maximum do
+          if i > 1 then emit(',') end
+          visit(rawget(v, i), depth + 1)
+        end
+        emit(']')
+      else
+        for _, key in ipairs(keys) do
+          if type(key) ~= 'string' then error('JSON objects require string keys; mixed or sparse numeric keys cannot be exported') end
+        end
+        if options.sortKeys then table.sort(keys) end
+        emit('{')
+        for i, key in ipairs(keys) do
+          if i > 1 then emit(',') end
+          stringValue(key); emit(':'); visit(rawget(v, key), depth + 1)
+        end
+        emit('}')
       end
-      table.insert(res, encode(k, stack) .. ":" .. encode(v, stack))
-    end
-    stack[val] = nil
-    return "{" .. table.concat(res, ",") .. "}"
+      active[v] = nil
+    elseif options.unsupportedAsString then
+      -- A type marker preserves the field/array slot without invoking __tostring.
+      stringValue('<' .. kind .. '>')
+    else error('JSON cannot represent Lua ' .. kind .. ' values') end
   end
+  visit(value, 0)
+  return table.concat(parts)
 end
-
-
-local function encode_string(val)
-  return '"' .. val:gsub('[%z\1-\31\\"]', escape_char) .. '"'
-end
-
-
-local function encode_number(val)
-  -- Check for NaN, -inf and inf
-  if val ~= val or val <= -math.huge or val >= math.huge then
-    error("unexpected number value '" .. tostring(val) .. "'")
-  end
-  return string.format("%.14g", val)
-end
-
-
-local type_func_map = {
-  [ "nil"     ] = encode_nil,
-  [ "table"   ] = encode_table,
-  [ "string"  ] = encode_string,
-  [ "number"  ] = encode_number,
-  [ "boolean" ] = tostring,
-}
-
-
-encode = function(val, stack)
-  local t = type(val)
-  local f = type_func_map[t]
-  if f then
-    return f(val, stack)
-  end
-  error("unexpected type '" .. t .. "'")
-end
-
-
-function json.encode(val)
-  return ( encode(val) )
-end
-
 
 -------------------------------------------------------------------------------
 -- Decode

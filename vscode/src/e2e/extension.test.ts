@@ -88,7 +88,7 @@ suite('Lua DevTools end to end', function () {
 
   test('registers its commands', async () => {
     const commands = await vscode.commands.getCommands(true);
-    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter']) {
+    for (const name of ['luaDevtools.run', 'luaDevtools.debug', 'luaDevtools.selectInterpreter', 'luaDevtools.viewTableJSON']) {
       assert.ok(commands.includes(name), `${name} is registered`);
     }
   });
@@ -190,6 +190,14 @@ suite('Lua DevTools end to end', function () {
 
       const evaluated = await session.customRequest('evaluate', { expression: 'a + b', frameId: stackFrames[0].id, context: 'repl' });
       assert.equal(evaluated.result, '30');
+
+      const table = await session.customRequest('evaluate', { expression: '{a=a,b=b,nested={true,"中文"}}', frameId: stackFrames[0].id, context: 'repl' });
+      await vscode.commands.executeCommand('luaDevtools.viewTableJSON', {
+        sessionId: session.id, variable: { name: 'sample', type: 'table', variablesReference: table.variablesReference },
+      });
+      const snapshot = await until(() => vscode.window.visibleTextEditors.find(editor => editor.document.uri.scheme === 'lua-table'), 10000, 'table JSON view');
+      assert.equal(snapshot.document.languageId, 'json');
+      assert.deepEqual(JSON.parse(snapshot.document.getText()), {a:10,b:20,nested:[true,"中文"]});
 
       await session.customRequest('continue', { threadId: 1 });
       await until(() => recorder.event('terminated'), 30000, 'terminated event');

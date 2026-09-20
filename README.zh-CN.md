@@ -28,6 +28,10 @@ VS Code ──LSP──▶ vscode/bin/lua-lsp (Go, tliron/glsp + tree-sitter-lua
 
 模块提供 stdin 就绪检测，让调试器在运行中接收暂停和断点修改。解释器版本感知的诊断和标准库补全支持 Lua 5.1–5.5 和 LuaJIT 2.1，包括 Lua 5.1 环境函数和 LuaJIT 的 `bit` / `jit` 库。
 
+## 表的 JSON 查看
+
+调试暂停时，在变量面板右键点击 `table`，选择 **查看表（JSON）**。查看会打开只读、可折叠的 JSON 快照。直接读取嵌套表，不受变量面板 200 项上限影响，也不调用表的元方法。连续从 1 开始的数字键转换为数组，字符串键转换为对象，空表转换为 `{}`。function／userdata／thread 值转换为 `"<function>"` 等类型标记字符串，仅供查看，不能还原原值。循环引用、混合／稀疏键、非有限数值和二进制字符串仍会明确报错。快照上限为 32 层、10,000 个值、512 KiB 紧凑 JSON；超限时提示错误。继续运行后，已打开的快照保持不变。
+
 ## 测试 CodeLens
 
 导入 `luaunit` 的测试文件中，全局 `test*`／`Test*` 函数和 `function TestFoo:testBar()` 等方法上方会显示 **运行测试／调试测试**。文件需调用 LuaUnit runner 并接受其标准命令行参数，例如 `os.exit(lu.LuaUnit.run())`。点击时传入精确用例名，保留 setup／teardown 流程。
@@ -109,7 +113,7 @@ CodeLens 端到端测试需要为 Lua 5.4 安装 `luaunit` 3.4 和 `busted` 2.2.
 | `internal/analysis` | tree-sitter 解析、作用域 / 符号表、位置转换（含单元测试） |
 | `internal/i18n` | Go 服务端的文案（en、zh-cn） |
 | `vscode/` | VS Code 扩展：`src/`、`lua/debugger.lua`（运行在被调试进程内）、`l10n/`、`package.nls*.json`、e2e 测试 `src/e2e/` |
-| `vscode/lua/json.lua` | vendored [rxi/json.lua](https://github.com/rxi/json.lua)（MIT） |
+| `vscode/lua/json.lua` | vendored [rxi/json.lua](https://github.com/rxi/json.lua)（MIT），编码器扩展了快照选项 |
 | `scripts/` | `build-go.mjs`、`package.mjs`、`e2e.mjs`、`*-smoke.mjs` |
 | `.github/workflows` | CI 逐平台构建并打包；发布 GitHub Release 时发布到 Marketplace 与 Open VSX |
 

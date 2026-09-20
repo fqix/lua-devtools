@@ -42,6 +42,10 @@
       {
         "command": "luaDevtools.selectInterpreter",
         "title": "%command.selectInterpreter%"
+      },
+      {
+        "command": "luaDevtools.viewTableJSON",
+        "title": "%command.viewTableJSON%"
       }
     ],
     "breakpoints": [
@@ -178,6 +182,17 @@
         {
           "command": "luaDevtools.debug",
           "when": "resourceLangId == lua"
+        },
+        {
+          "command": "luaDevtools.viewTableJSON",
+          "when": "false"
+        }
+      ],
+      "debug/variables/context": [
+        {
+          "command": "luaDevtools.viewTableJSON",
+          "when": "debugType == lua && debugState == stopped && variableType == table",
+          "group": "luaTable@0"
         }
       ]
     }

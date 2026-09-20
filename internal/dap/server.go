@@ -85,8 +85,16 @@ func (s *Server) Run() error {
 			s.rt.Dispose()
 		}
 	}()
+	codec := dap.NewCodec()
+	if err := codec.RegisterRequest("lua/snapshot", func() dap.Message { return &snapshotRequest{} }, func() dap.Message { return &snapshotResponse{} }); err != nil {
+		return err
+	}
 	for {
-		msg, err := dap.ReadProtocolMessage(s.reader)
+		content, err := dap.ReadBaseMessage(s.reader)
+		var msg dap.Message
+		if err == nil {
+			msg, err = codec.DecodeMessage(content)
+		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
@@ -125,6 +133,8 @@ func (s *Server) handle(msg dap.Message) bool {
 		s.onScopes(req)
 	case *dap.VariablesRequest:
 		s.onVariables(req)
+	case *snapshotRequest:
+		s.onSnapshot(req)
 	case *dap.EvaluateRequest:
 		s.onEvaluate(req)
 	case *dap.ContinueRequest:

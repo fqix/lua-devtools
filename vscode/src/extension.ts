@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { registerTableView } from './tableView';
 import { registerInterpreterSelection } from './interpreterSelection';
 import { LanguageClient, TransportKind } from 'vscode-languageclient/node';
 
@@ -18,6 +19,7 @@ function binaryPath(context: vscode.ExtensionContext, name: string): string | un
 
 export function activate(context: vscode.ExtensionContext): void {
   registerInterpreterSelection(context);
+  registerTableView(context);
   registerDebugger(context);
   registerRunCommands(context);
   startLanguageClient(context);

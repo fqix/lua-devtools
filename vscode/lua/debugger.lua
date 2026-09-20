@@ -14,6 +14,7 @@
 
 local scriptDir = (arg and arg[0] or ""):match("^(.*)[/\\]") or "."
 local json = dofile(scriptDir .. "/json.lua")
+local snapshot = assert(loadfile(scriptDir .. "/snapshot.lua"))(json.encode)
 
 local unpackValues = table.unpack or unpack
 local packValues = table.pack or function(...) return { n = select("#", ...), ... } end
@@ -171,6 +172,7 @@ local function registerThread(co)
   return threadIDs[co]
 end
 
+local nextVarRef = 0 -- references are never reused after resume
 local varRefs = {}     -- rebuilt on every pause: ref -> { kind = ..., ... }
 local mainChunk = nil  -- the script's main function; stack listing stops there
 local noDebug = false  -- "Run Without Debugging": never install the hook
@@ -180,8 +182,9 @@ local hook    -- forward declaration; findAnchor locates it by identity
 local onError -- xpcall message handler; the anchor while paused on an exception
 
 local function newRef(entry)
-  varRefs[#varRefs + 1] = entry
-  return #varRefs
+  nextVarRef = nextVarRef + 1
+  varRefs[nextVarRef] = entry
+  return nextVarRef
 end
 
 local function isAbsolute(path)
@@ -586,6 +589,12 @@ function handlers.scopes(cmd)
       { name = "Upvalues", variablesReference = newRef({ kind = "upvalues", frameId = frameId }) },
     },
   }
+end
+
+function handlers.snapshot(cmd)
+  local entry = varRefs[cmd.ref or 0]
+  assert(entry and entry.kind == "table", "Table reference is unavailable; pause and select the variable again")
+  return { json = snapshot(entry.value) }
 end
 
 function handlers.variables(cmd)
