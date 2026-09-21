@@ -145,7 +145,7 @@ flowchart TD
   probed --> items["CompletionItems<br/>':' 只保留函数"]
 ```
 
-`moduleResolver` 优先使用扩展传入的当前环境搜索路径（项目依赖目录、解释器 `package.path`），再在所属工作区根目录和源文件的各级父目录下查找 `?.lua` 和 `?/init.lua`。路径按工作区隔离，未保存的打开文档优先于磁盘内容,并限制文件大小和依赖深度。这样找到的定义同时支撑跨文件的转到定义。
+`moduleResolver` 优先使用扩展传入的当前环境搜索路径（先是该目录下 Lua launch 配置的 `packagePath`，由扩展通过 `launch` 配置 API 读取并替换变量，再是项目依赖目录和解释器 `package.path`），再在所属工作区根目录和源文件的各级父目录下查找 `?.lua` 和 `?/init.lua`。路径按工作区隔离，未保存的打开文档优先于磁盘内容,并限制文件大小和依赖深度。这样找到的定义同时支撑跨文件的转到定义。
 
 ### CodeLens
 

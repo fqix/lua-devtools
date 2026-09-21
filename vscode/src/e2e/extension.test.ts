@@ -423,6 +423,34 @@ suite('Lua DevTools end to end', function () {
       }
     });
 
+    test('resolves modules through launch.json packagePath', async () => {
+      const launchDir = fileUri('.vscode');
+      const launch = vscode.Uri.joinPath(launchDir, 'launch.json');
+      const moduleDir = fileUri('launch_paths');
+      const module = vscode.Uri.joinPath(moduleDir, 'launch_fixture.lua');
+      const main = fileUri('launch-navigation.lua');
+      await vscode.workspace.fs.createDirectory(launchDir);
+      await vscode.workspace.fs.createDirectory(moduleDir);
+      await vscode.workspace.fs.writeFile(module, Buffer.from('local M={}\nfunction M.go() end\nreturn M\n'));
+      await vscode.workspace.fs.writeFile(main, Buffer.from('local m=require("launch_fixture")\nm.go()\n'));
+      // launch.json with comments, as VS Code writes it: the extension must read it through the configuration API.
+      await vscode.workspace.fs.writeFile(launch, Buffer.from('{\n  // launch.json packagePath feeds language analysis\n  "version": "0.2.0",\n  "configurations": [\n    { "type": "lua", "request": "launch", "name": "Fixture", "program": "${file}", "packagePath": ["${workspaceFolder}/launch_paths/?.lua"] }\n  ]\n}\n'));
+      try {
+        const document = await vscode.workspace.openTextDocument(main);
+        await vscode.window.showTextDocument(document);
+        const definitions = () => vscode.commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', main, positionOf(document, 'go()'));
+        const locations = await retry(definitions, values => values.some(value => value.uri.fsPath === module.fsPath), 'launch.json packagePath definition');
+        assert.equal(locations[0].range.start.line, 1);
+        const options = await languageEnvironment('', true, [folder().uri.fsPath], () => ({ lua: ['/from-launch/?.lua'], native: ['/from-launch/?.so'] }));
+        assert.equal(options.modulePaths[0].templates[0], '/from-launch/?.lua');
+        assert.equal(options.modulePaths[0].ctemplates[0], '/from-launch/?.so');
+      } finally {
+        await vscode.workspace.fs.delete(launchDir, { recursive: true });
+        await vscode.workspace.fs.delete(moduleDir, { recursive: true });
+        await vscode.workspace.fs.delete(main);
+      }
+    });
+
     test('switches package definitions with interpreters and reads external search paths', async function () {
       const interpreters = await discoverInterpreters('');
       if (interpreters.length < 2) { this.skip(); return; }

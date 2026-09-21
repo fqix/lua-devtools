@@ -145,7 +145,7 @@ flowchart TD
   probed --> items["CompletionItems<br/>':' keeps functions only"]
 ```
 
-`moduleResolver` first uses the selected environment’s search templates (project packages and interpreter `package.path`), scoped by workspace, then searches `?.lua` and `?/init.lua` under the containing workspace root and the source file's ancestor directories, prefers unsaved open documents over disk, and caps file size and dependency depth. Definitions found this way also power go-to-definition across files.
+`moduleResolver` first uses the selected environment’s search templates (`packagePath` of the folder's Lua launch configurations, resolved by the extension through the `launch` configuration API, then project packages and the interpreter's `package.path`), scoped by workspace, then searches `?.lua` and `?/init.lua` under the containing workspace root and the source file's ancestor directories, prefers unsaved open documents over disk, and caps file size and dependency depth. Definitions found this way also power go-to-definition across files.
 
 ### Code lenses
 

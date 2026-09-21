@@ -29,8 +29,9 @@ func withinDirectory(root, path string) bool {
 }
 
 type moduleSearchPath struct {
-	Root      string   `json:"root"`
-	Templates []string `json:"templates"`
+	Root       string   `json:"root"`
+	Templates  []string `json:"templates"`
+	CTemplates []string `json:"ctemplates"` // package.cpath-style templates for native modules
 }
 
 type moduleCandidate struct {

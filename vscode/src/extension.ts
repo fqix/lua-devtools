@@ -7,6 +7,7 @@ import { registerDebugControls } from './debugControls';
 import { registerTableView } from './tableView';
 import { registerInterpreterSelection } from './interpreterSelection';
 import { languageEnvironment, type LanguageEnvironment } from './languageEnvironment';
+import { launchPackagePaths } from './launchPaths';
 import { LanguageClient, TransportKind } from 'vscode-languageclient/node';
 
 /**
@@ -106,6 +107,10 @@ function startLanguageClient(context: vscode.ExtensionContext): void {
         vscode.workspace.getConfiguration('luaDevtools').get<string>('luaPath') ?? '',
         vscode.workspace.isTrusted,
         vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? [],
+        root => {
+          const configurations = vscode.workspace.getConfiguration('launch', vscode.Uri.file(root)).get('configurations');
+          return { lua: launchPackagePaths(configurations, root), native: launchPackagePaths(configurations, root, process.env, 'packageCPath') };
+        },
       );
       if (disposed || current !== revision) return;
       options = next;
@@ -118,7 +123,8 @@ function startLanguageClient(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     { dispose: () => { disposed = true; void languageClient.stop(); } },
     vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('luaDevtools.luaPath')) refresh();
+      // launch.json packagePath feeds module resolution, so its edits refresh too.
+      if (event.affectsConfiguration('luaDevtools.luaPath') || event.affectsConfiguration('launch')) refresh();
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(refresh),
     vscode.workspace.onDidGrantWorkspaceTrust(refresh),
