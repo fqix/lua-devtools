@@ -13,7 +13,7 @@ Lua debugging and language support for VS Code, supporting **Lua 5.1–5.5 and L
 ## Features
 
 - Breakpoints, conditional breakpoints, stepping, call stacks, coroutine inspection and Debug Console evaluation.
-- Syntax diagnostics, completion, hover, outline, definitions, references, local renaming and signature help, including Lua 5.5 declarations and statically resolved local modules.
+- Syntax diagnostics, completion, hover, outline, definitions, signature help, and workspace-wide references and rename for locals, globals and statically resolved table members, including Lua 5.5 declarations and local modules.
 - Interpreter discovery, switching and project-local package installation.
 - Read-only table JSON views and per-test Run/Debug actions for LuaUnit and Busted.
 - English and Simplified Chinese UI.
@@ -65,7 +65,7 @@ TCP attach supports Lua and embedded hosts that load the debugger; disconnect le
 
 - Pause and live breakpoint updates use the bundled native helper in ordinary launch sessions, or LuaSocket polling in TCP mode. Blocking C calls must return to Lua; F11 cannot enter C implementations such as `os.time` or `cjson.encode`.
 - LuaJIT compilation is disabled while debugging. Attach requires cooperative host setup; it cannot inject into an arbitrary process.
-- References are limited to the current file. Renaming supports lexical locals, parameters and functions, rejecting names that change bindings. Signature help uses static function declarations.
+- References and rename follow lexical bindings, globals and table members that static analysis can attribute to one table (module exports, `__index` chains, aliases). Dynamic keys (`t[name]`, `_G[name]`), fields of untyped values such as parameters or `self`, and instances returned by constructor functions are not followed. Renames are rejected when they would capture or merge bindings, when nested tables are replaced or reassignment makes table bindings (including aliases) uncertain, or when the member is declared in an installed package or outside the workspace. Signature help uses static function declarations.
 - Language analysis is static: dynamic loaders, runtime changes to `package.path`, launch-only path overrides and native C implementations are not resolved. Without a trusted, working interpreter, analysis falls back to Lua 5.4.
 
 ## Documentation

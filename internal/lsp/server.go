@@ -280,15 +280,21 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 	}
 	f := doc.file
 	f.ModuleMembers = s.moduleResolver(params.TextDocument.URI, true)
-	defer func() { f.ModuleMembers = nil }()
-	if def := f.ImplementationAt(f.OffsetOf(fromPosition(params.Position))); def != nil {
+	defer func() { f.ModuleMembers = nil; f.ResetReferences() }()
+	offset := f.OffsetOf(fromPosition(params.Position))
+	def := f.ImplementationAt(offset)
+	if def == nil {
+		// Data fields have no implementation; go to where the member is declared.
+		def = f.MemberDeclarationAt(offset)
+	}
+	if def != nil {
 		uri := def.URI
 		if uri == "" {
 			uri = doc.uri
 		}
 		return protocol.Location{URI: uri, Range: protocol.Range{Start: toPosition(def.Start), End: toPosition(def.End)}}, nil
 	}
-	sym, _ := f.SymbolAt(f.OffsetOf(fromPosition(params.Position)))
+	sym, _ := f.SymbolAt(offset)
 	if sym == nil {
 		return nil, nil
 	}

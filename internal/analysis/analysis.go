@@ -81,7 +81,18 @@ type Scope struct {
 	Symbols            []*Symbol
 	Children           []*Scope
 	Owner              *Symbol // the function symbol that owns a ScopeFunction, if named
+	Loop               bool    // a for/while/repeat body: statements after a point may run before it
 	globalDeclarations []globalDeclaration
+}
+
+// Encloses reports whether s is outer or one of its ancestors.
+func (s *Scope) Encloses(inner *Scope) bool {
+	for ; inner != nil; inner = inner.Parent {
+		if inner == s {
+			return true
+		}
+	}
+	return false
 }
 
 type globalDeclaration struct {
@@ -136,6 +147,13 @@ type File struct {
 
 	tree         *tree_sitter.Tree
 	memberWrites []memberWrite
+	// constructorValues, writeValues and rootPlaceholders, while non-nil, make
+	// every replay produce the same table pointers so reference identities can
+	// compare them; see identityState.
+	constructorValues map[uintptr]*memberValue
+	writeValues       map[writeKey]*memberValue
+	rootPlaceholders  map[*Symbol]*memberValue
+	identities        *identityState
 }
 
 // Parse analyses one document. Call Close when done with it.
@@ -245,6 +263,14 @@ type walker struct {
 
 func (w *walker) newScope(kind ScopeKind, parent *Scope, n *tree_sitter.Node) *Scope {
 	s := &Scope{Kind: kind, Parent: parent, Start: int(n.StartByte()), End: int(n.EndByte())}
+	if kind == ScopeBlock {
+		switch n.Kind() {
+		case "repeat_statement", "for_statement":
+			s.Loop = true
+		case "block":
+			s.Loop = n.Parent() != nil && n.Parent().Kind() == "while_statement"
+		}
+	}
 	parent.Children = append(parent.Children, s)
 	return s
 }

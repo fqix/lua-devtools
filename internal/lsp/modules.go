@@ -188,11 +188,14 @@ func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []
 			var members []analysis.Member
 			if len(definitions) > 0 && definitions[0] {
 				members = module.ExportedDefinitions()
+				uri := pathFileURI(candidate.path)
 				for i := range members {
-					if def := members[i].Definition; def != nil && def.URI == "" {
-						copy := *def
-						copy.URI = pathFileURI(candidate.path)
-						members[i].Definition = &copy
+					for _, location := range []**analysis.Definition{&members[i].Definition, &members[i].Declaration} {
+						if def := *location; def != nil && def.URI == "" {
+							copy := *def
+							copy.URI = uri
+							*location = &copy
+						}
 					}
 				}
 			} else {

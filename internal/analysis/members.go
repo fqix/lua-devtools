@@ -8,10 +8,14 @@ import (
 )
 
 // Member is a statically named field in a table or a function declaration.
+// Definition is the implementation a function value points at (through aliases);
+// Declaration is where the field itself is first written or declared.
 type Member struct {
-	Name       string
-	Function   bool
-	Definition *Definition
+	Name        string
+	Function    bool
+	Definition  *Definition
+	Declaration *Definition
+	SelfIndex   bool // the field is the exported table itself (`M.__index = M`)
 }
 
 // Definition is a source location independent of the lifetime of a parsed tree.
@@ -24,19 +28,27 @@ type Definition struct {
 }
 
 type memberValue struct {
-	function   bool
-	definition *Definition
-	fields     map[string]*memberValue
-	returns    *tree_sitter.Node
-	index      *memberValue
+	function     bool
+	definition   *Definition
+	fields       map[string]*memberValue
+	decls        map[string]*Definition // first declaration site of each field
+	origin       string                 // module file URI when the table is a resolved module export
+	returns      *tree_sitter.Node
+	index        *memberValue
+	renameUnsafe bool // reference analysis cannot determine this table's bindings
+}
+
+func newMemberValue() *memberValue {
+	return &memberValue{fields: map[string]*memberValue{}, decls: map[string]*Definition{}}
 }
 
 type memberWrite struct {
-	root  *Symbol
-	path  []string
-	at    int
-	scope *Scope
-	value *tree_sitter.Node
+	root             *Symbol
+	path             []string
+	keyStart, keyEnd int // span of the last key, without string quotes
+	at               int
+	scope            *Scope
+	value            *tree_sitter.Node
 }
 
 // collectMembers records writes without executing code or guessing dynamic keys.
@@ -89,9 +101,35 @@ func (f *File) recordMemberWrite(target, value *tree_sitter.Node, at int, functi
 	if function && scope.Kind == ScopeFunction {
 		scope = scope.Parent
 	}
-	f.memberWrites = append(f.memberWrites, memberWrite{
-		root: sym, path: path, at: at, scope: scope, value: value,
-	})
+	write := memberWrite{root: sym, path: path, at: at, scope: scope, value: value}
+	if len(path) > 0 {
+		write.keyStart, write.keyEnd = f.keySpan(lastKeyNode(target))
+	}
+	f.memberWrites = append(f.memberWrites, write)
+}
+
+// lastKeyNode is the field, method or bracket key of an index expression.
+func lastKeyNode(n *tree_sitter.Node) *tree_sitter.Node {
+	switch n.Kind() {
+	case "dot_index_expression", "bracket_index_expression":
+		return n.ChildByFieldName("field")
+	case "method_index_expression":
+		return n.ChildByFieldName("method")
+	}
+	return nil
+}
+
+// keySpan is the byte range of a key's name: the identifier itself, or the
+// contents of a plain quoted string, so edits can replace just the name.
+func (f *File) keySpan(n *tree_sitter.Node) (int, int) {
+	if n == nil {
+		return 0, 0
+	}
+	start, end := int(n.StartByte()), int(n.EndByte())
+	if n.Kind() == "string" && end-start >= 2 {
+		return start + 1, end - 1
+	}
+	return start, end
 }
 
 func (f *File) memberPath(n *tree_sitter.Node) (*tree_sitter.Node, []string) {
@@ -159,7 +197,7 @@ func IsIdentifier(text string) bool {
 // inferMemberValue follows values only through statically resolvable expressions.
 // Shared pointers preserve table aliases; rebinding a name replaces its pointer.
 func (f *File) inferMemberValue(n *tree_sitter.Node, values map[*Symbol]*memberValue, depth int) *memberValue {
-	value := &memberValue{fields: map[string]*memberValue{}}
+	value := newMemberValue()
 	if n == nil || depth > 16 {
 		return value
 	}
@@ -227,9 +265,15 @@ func (f *File) inferMemberValue(n *tree_sitter.Node, values map[*Symbol]*memberV
 				text := arg.Utf8Text(f.Text)
 				if len(text) >= 2 && (text[0] == '\'' || text[0] == '"') {
 					for _, member := range f.ModuleMembers(text[1 : len(text)-1]) {
-						value.fields[member.Name] = &memberValue{
-							function: member.Function, definition: member.Definition,
-							fields: map[string]*memberValue{},
+						field := newMemberValue()
+						field.function, field.definition = member.Function, member.Definition
+						value.fields[member.Name] = field
+						if member.SelfIndex {
+							value.fields[member.Name] = value
+						}
+						if member.Declaration != nil {
+							value.decls[member.Name] = member.Declaration
+							value.origin = member.Declaration.URI
 						}
 					}
 				}
@@ -254,15 +298,26 @@ func (f *File) inferMemberValue(n *tree_sitter.Node, values map[*Symbol]*memberV
 			}
 		}
 	case "table_constructor":
+		// Reference identities compare table pointers, so one constructor must
+		// map to one value while identities are being computed.
+		if cached := f.constructorValues[n.Id()]; cached != nil {
+			return cached
+		}
+		if f.constructorValues != nil {
+			f.constructorValues[n.Id()] = value
+		}
 		for i := uint(0); i < n.NamedChildCount(); i++ {
 			child := n.NamedChild(i)
 			if child.Kind() != "field" {
 				continue
 			}
 			first := child.Child(0)
-			name := f.staticKey(child.ChildByFieldName("name"), first != nil && first.Kind() != "[")
+			key := child.ChildByFieldName("name")
+			name := f.staticKey(key, first != nil && first.Kind() != "[")
 			if name != "" {
 				value.fields[name] = f.inferMemberValue(child.ChildByFieldName("value"), values, depth+1)
+				start, end := f.keySpan(key)
+				value.decls[name] = &Definition{Start: f.PositionOf(start), End: f.PositionOf(end)}
 			}
 		}
 	}
@@ -289,6 +344,18 @@ func (v *memberValue) members(out map[string]*memberValue, seen map[*memberValue
 	for name, field := range v.fields {
 		out[name] = field
 	}
+}
+
+// owner is the table in the __index chain that declares the field.
+func (v *memberValue) owner(name string, seen map[*memberValue]bool) *memberValue {
+	if v == nil || seen[v] {
+		return nil
+	}
+	seen[v] = true
+	if v.decls[name] != nil {
+		return v
+	}
+	return v.index.owner(name, seen)
 }
 
 // KnownMembers returns fields for a simple receiver path at the cursor. The
@@ -334,19 +401,68 @@ func (f *File) memberState(offset int) map[*Symbol]*memberValue {
 	for scope := f.ScopeAt(offset); scope != nil; scope = scope.Parent {
 		scopes[scope] = true
 	}
+	return f.replayMembers(func(write memberWrite) bool { return write.at <= offset && scopes[write.scope] })
+}
+
+// writeKey identifies one member write across replays.
+type writeKey struct {
+	at   int
+	root *Symbol
+	path string
+}
+
+// inferWriteValue infers a write's value. While reference identities are being
+// computed, results are cached so every replay binds the same table pointers:
+// a write sees the same preceding writes in every replay that includes it.
+func (f *File) inferWriteValue(write memberWrite, values map[*Symbol]*memberValue) *memberValue {
+	if f.writeValues == nil {
+		return f.inferMemberValue(write.value, values, 0)
+	}
+	key := writeKey{at: write.at, root: write.root, path: strings.Join(write.path, ".")}
+	if value, ok := f.writeValues[key]; ok {
+		return value
+	}
+	value := f.inferMemberValue(write.value, values, 0)
+	f.writeValues[key] = value
+	return value
+}
+
+// placeholderTable stands for a name whose table is never bound in this file
+// (a parameter, an upvalue, an undeclared global). Shared while reference
+// identities are being computed, for the same reason as inferWriteValue.
+func (f *File) placeholderTable(root *Symbol) *memberValue {
+	if f.writeValues == nil {
+		return newMemberValue()
+	}
+	if value := f.rootPlaceholders[root]; value != nil {
+		return value
+	}
+	value := newMemberValue()
+	f.rootPlaceholders[root] = value
+	return value
+}
+
+// replayMembers applies the selected writes in source order.
+func (f *File) replayMembers(include func(memberWrite) bool) map[*Symbol]*memberValue {
+	return f.replayMemberWrites(include, nil)
+}
+
+// observe sees the old and new values before each write, while they still
+// retain their identity. Reference analysis uses it to detect unsafe aliases.
+func (f *File) replayMemberWrites(include func(memberWrite) bool, observe func(memberWrite, *memberValue, *memberValue)) map[*Symbol]*memberValue {
 	values := map[*Symbol]*memberValue{}
 	writes := append([]memberWrite(nil), f.memberWrites...)
 	sort.SliceStable(writes, func(i, j int) bool { return writes[i].at < writes[j].at })
 	pending := map[int]*memberValue{}
 	targets := map[int]*memberValue{}
 	for i, write := range writes {
-		if write.at > offset || !scopes[write.scope] {
+		if !include(write) {
 			continue
 		}
 		value, ready := pending[i]
 		if !ready {
 			for j := i; j < len(writes) && writes[j].at == write.at; j++ {
-				pending[j] = f.inferMemberValue(writes[j].value, values, 0)
+				pending[j] = f.inferWriteValue(writes[j], values)
 				if len(writes[j].path) > 0 {
 					parent := values[writes[j].root]
 					for _, name := range writes[j].path[:len(writes[j].path)-1] {
@@ -361,6 +477,9 @@ func (f *File) memberState(offset int) map[*Symbol]*memberValue {
 			value = pending[i]
 		}
 		if len(write.path) == 0 {
+			if observe != nil {
+				observe(write, values[write.root], value)
+			}
 			values[write.root] = value
 			continue
 		}
@@ -368,22 +487,32 @@ func (f *File) memberState(offset int) map[*Symbol]*memberValue {
 		if parent == nil {
 			parent = values[write.root]
 			if parent == nil {
-				parent = &memberValue{fields: map[string]*memberValue{}}
+				parent = f.placeholderTable(write.root)
 				values[write.root] = parent
 			}
 
 			for _, name := range write.path[:len(write.path)-1] {
 				if parent.fields[name] == nil {
-					parent.fields[name] = &memberValue{fields: map[string]*memberValue{}}
+					parent.fields[name] = newMemberValue()
 				}
 				parent = parent.fields[name]
 			}
 		}
 		key := write.path[len(write.path)-1]
+		if observe != nil {
+			observe(write, parent.fields[key], value)
+		}
+		if parent.renameUnsafe {
+			value.markRenameUnsafe()
+		}
+		// Declarations survive `t.x = nil`: the field is still the same member.
 		if write.value != nil && write.value.Kind() == "nil" {
 			delete(parent.fields, key)
 		} else {
 			parent.fields[key] = value
+			if parent.decls[key] == nil {
+				parent.decls[key] = &Definition{Start: f.PositionOf(write.keyStart), End: f.PositionOf(write.keyEnd)}
+			}
 		}
 	}
 	return values
@@ -419,6 +548,10 @@ func (f *File) exportedMembers(definitions bool) []Member {
 			member := Member{Name: name, Function: value.function}
 			if definitions {
 				member.Definition = value.definition
+				member.SelfIndex = value == shape
+				if owner := shape.owner(name, map[*memberValue]bool{}); owner != nil {
+					member.Declaration = owner.decls[name]
+				}
 			}
 			members = append(members, member)
 		}

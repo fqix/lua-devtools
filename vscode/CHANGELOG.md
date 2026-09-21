@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Find references and rename across the workspace for globals and statically resolved table members (module exports, `__index` chains, aliases), with per-file edits and conflict checks; bindings are tracked per site, and rename refuses members whose table is reassigned undecidably or declared in installed packages. Go to definition reaches data fields through their first declaration.
+
 ## 0.4.0
 
 - Cache canonical module search roots within each language request to avoid repeated filesystem lookups while keeping later requests fresh.

@@ -325,6 +325,66 @@ suite('Lua DevTools end to end', function () {
       } finally { await vscode.workspace.fs.delete(uri); }
     });
 
+    test('rejects unsafe member aliases and global declaration captures', async () => {
+      const cases = [
+        { name: 'nested', source: 'local t={child={foo=1}}\nprint(t.child.foo)\nt.child={foo=2}\nprint(t.child.foo)\n', cursor: 'foo=1', replacement: 'bar', error: /rename is unsafe/ },
+        { name: 'alias', source: 'local t={foo=1}\nif flag then t={foo=2} end\nlocal alias=t\nprint(alias.foo)\n', cursor: 'foo=1', replacement: 'bar', error: /rename is unsafe/ },
+        { name: 'global', source: 'local review_local=1\nfunction review_global() end\n', cursor: 'review_global', replacement: 'review_local', error: /binding/ },
+      ];
+      for (const item of cases) {
+        const uri = fileUri(`unsafe-rename-${item.name}.lua`);
+        await vscode.workspace.fs.writeFile(uri, Buffer.from(item.source));
+        try {
+          const document = await vscode.workspace.openTextDocument(uri);
+          await vscode.window.showTextDocument(document);
+          await retry(
+            () => vscode.commands.executeCommand<vscode.Location[]>('vscode.executeReferenceProvider', uri, positionOf(document, item.cursor)),
+            values => values.length > 0, `unsafe rename ${item.name} ready`,
+          );
+          await assert.rejects(
+            Promise.resolve(vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', uri, positionOf(document, item.cursor), item.replacement)),
+            item.error,
+          );
+          assert.equal(document.getText(), item.source);
+          assert.equal(document.isDirty, false);
+        } finally { await vscode.workspace.fs.delete(uri); }
+      }
+    });
+
+    test('finds and renames module members and globals across files', async () => {
+      const moduleDir = fileUri('xref');
+      const module = vscode.Uri.joinPath(moduleDir, 'store.lua');
+      const consumer = fileUri('xref-consumer.lua');
+      const main = fileUri('xref-main.lua');
+      await vscode.workspace.fs.createDirectory(moduleDir);
+      await vscode.workspace.fs.writeFile(module, Buffer.from('local M = {}\nfunction M.put(key) end\nM.size = 0\nreturn M\n'));
+      await vscode.workspace.fs.writeFile(consumer, Buffer.from('local store = require("xref.store")\nstore.put("a")\nshared_flag = true\n'));
+      await vscode.workspace.fs.writeFile(main, Buffer.from('local s = require("xref.store")\ns.put("b")\nprint(s.size, shared_flag)\n'));
+      try {
+        const document = await vscode.workspace.openTextDocument(main);
+        await vscode.window.showTextDocument(document);
+        const refs = await retry(
+          () => vscode.commands.executeCommand<vscode.Location[]>('vscode.executeReferenceProvider', main, positionOf(document, 'put("b")')),
+          values => values.length === 3, 'cross-file member references',
+        );
+        assert.deepEqual(refs.map(ref => [ref.uri.fsPath, ref.range.start.line]).sort(), [[consumer.fsPath, 1], [main.fsPath, 1], [module.fsPath, 1]].sort());
+        const globals = await vscode.commands.executeCommand<vscode.Location[]>('vscode.executeReferenceProvider', main, positionOf(document, 'shared_flag'));
+        assert.deepEqual(globals.map(ref => ref.uri.fsPath).sort(), [consumer.fsPath, main.fsPath]);
+        const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>('vscode.executeDocumentRenameProvider', main, positionOf(document, 'put("b")'), 'insert');
+        assert.equal(edit.entries().length, 3);
+        assert.ok(await vscode.workspace.applyEdit(edit));
+        assert.match(document.getText(), /s\.insert\("b"\)/);
+        assert.match((await vscode.workspace.openTextDocument(module)).getText(), /function M\.insert\(key\)/);
+        assert.match((await vscode.workspace.openTextDocument(consumer)).getText(), /store\.insert\("a"\)/);
+        await assert.rejects(Promise.resolve(vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', main, positionOf(document, 'insert("b")'), 'size')));
+        await vscode.workspace.saveAll(false);
+      } finally {
+        await vscode.workspace.fs.delete(moduleDir, { recursive: true });
+        await vscode.workspace.fs.delete(consumer);
+        await vscode.workspace.fs.delete(main);
+      }
+    });
+
     test('navigates installed Lua packages and unsaved dependency sources', async () => {
       const executable = await automaticInterpreter();
       assert.ok(executable);
