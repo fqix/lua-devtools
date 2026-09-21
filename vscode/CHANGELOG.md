@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - Add `luaDevtools.probeNativeModules` (off by default): load C modules in the selected interpreter to complete their members after `require`, using project packages, the interpreter's `package.cpath` and launch `packageCPath`.
 - Find references and rename across the workspace for globals and statically resolved table members (module exports, `__index` chains, aliases), with per-file edits and conflict checks; bindings are tracked per site, and rename refuses members whose table is reassigned undecidably or declared in installed packages. Go to definition reaches data fields through their first declaration.
