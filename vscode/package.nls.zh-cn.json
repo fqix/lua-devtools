@@ -25,6 +25,7 @@
   "view.environments.trust": "信任此工作区后可发现 Lua 解释器。\n[管理工作区信任](command:workbench.trust.manage)",
   "command.installPackage": "安装 Lua 包…",
   "config.luarocksPath": "LuaRocks 可执行文件路径或命令；为空时从 PATH 查找 luarocks。包按所选解释器安装到项目独立目录。",
+  "config.probeNativeModules": "在所选解释器中加载 C 模块（项目安装包和解释器 cpath 里的 .so/.dll），以补全 require 后的成员。默认关闭，因为这会执行第三方原生代码；只对信任的包开启。",
   "config.styluaPath": "用于 Lua 格式化的 StyLua 可执行文件路径或命令。为空时从 PATH 查找 stylua，遵循项目 stylua.toml 配置。",
   "command.upgradePackage": "升级到最新版本",
   "command.uninstallPackage": "卸载此版本",

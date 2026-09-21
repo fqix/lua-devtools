@@ -206,6 +206,16 @@ func (s *Server) moduleResolver(uri string, definitions ...bool) func(string) []
 			cache[name] = members
 			return members
 		}
+		if environment != nil && s.probeNative {
+			base := environment.Root
+			if base == "" {
+				base = root
+			}
+			if members := s.nativeModuleMembers(name, base, environment); members != nil {
+				cache[name] = members
+				return members
+			}
+		}
 		return nil
 	}
 	return resolve

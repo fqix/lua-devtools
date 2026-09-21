@@ -145,6 +145,8 @@ flowchart TD
   probed --> items["CompletionItems<br/>':' keeps functions only"]
 ```
 
+When no Lua source matches a `require` and `luaDevtools.probeNativeModules` is on, `lsp/native.go` looks for the shared library the interpreter would load (`?.so` / `?.dll` templates, including the all-in-one `a.so` for `a.b`), and only if one exists runs `pcall(require, name)` in the selected interpreter with the environment's `LUA_PATH` / `LUA_CPATH` to list the exported table. Results, including failures, are cached per library file (modification time and size). This is the one place analysis executes third-party code, which is why it is opt-in.
+
 `moduleResolver` first uses the selected environment’s search templates (`packagePath` of the folder's Lua launch configurations, resolved by the extension through the `launch` configuration API, then project packages and the interpreter's `package.path`), scoped by workspace, then searches `?.lua` and `?/init.lua` under the containing workspace root and the source file's ancestor directories, prefers unsaved open documents over disk, and caps file size and dependency depth. Definitions found this way also power go-to-definition across files.
 
 ### Code lenses

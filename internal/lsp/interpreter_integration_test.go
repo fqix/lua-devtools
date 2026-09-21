@@ -156,3 +156,24 @@ func TestInterpreterDoesNotExecuteDocumentOrInit(t *testing.T) {
 		t.Fatalf("document or LUA_INIT executed: %v", err)
 	}
 }
+
+// A file that is not a loadable library yields no members and no error; the
+// interpreter reports the failure and the result is cached.
+func TestNativeProbeUnloadableLibrary(t *testing.T) {
+	runtime := inspectInterpreter(os.Getenv("LUA_TEST_BINARY"))
+	if runtime == nil {
+		t.Skip("no Lua interpreter")
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "broken.so"), []byte("not a shared library"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{runtime: runtime, probeNative: true}
+	environment := &moduleSearchPath{Root: root, CTemplates: []string{"?.so"}}
+	if members := server.nativeModuleMembers("broken", root, environment); members != nil {
+		t.Fatalf("members = %+v", members)
+	}
+	if entry, ok := server.nativeCache[filepath.Join(root, "broken.so")+"\x00broken"]; !ok || entry.members != nil {
+		t.Fatalf("failure not cached: %+v", server.nativeCache)
+	}
+}

@@ -43,6 +43,10 @@ type Server struct {
 	runtime        *interpreter
 	workspaceRoots []string
 	modulePaths    []moduleSearchPath
+	// probeNative allows loading C modules in the interpreter to list their
+	// members. Off by default: it executes third-party native code.
+	probeNative bool
+	nativeCache map[string]nativeModule
 }
 
 func (s *Server) t(key string, args ...any) string {
@@ -83,6 +87,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 		UseInterpreter bool               `json:"useInterpreter"`
 		WorkspaceRoots []string           `json:"workspaceRoots"`
 		ModulePaths    []moduleSearchPath `json:"modulePaths"`
+		ProbeNative    bool               `json:"probeNativeModules"`
 	}
 	if raw, err := json.Marshal(params.InitializationOptions); err == nil {
 		_ = json.Unmarshal(raw, &options)
@@ -91,6 +96,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	if options.UseInterpreter {
 		s.runtime = inspectInterpreter(options.LuaPath)
 		s.modulePaths = options.ModulePaths
+		s.probeNative = options.ProbeNative
 	}
 	prepareRename := true
 	caps := protocol.ServerCapabilities{

@@ -111,6 +111,7 @@ function startLanguageClient(context: vscode.ExtensionContext): void {
           const configurations = vscode.workspace.getConfiguration('launch', vscode.Uri.file(root)).get('configurations');
           return { lua: launchPackagePaths(configurations, root), native: launchPackagePaths(configurations, root, process.env, 'packageCPath') };
         },
+        vscode.workspace.getConfiguration('luaDevtools').get<boolean>('probeNativeModules') ?? false,
       );
       if (disposed || current !== revision) return;
       options = next;
@@ -124,7 +125,7 @@ function startLanguageClient(context: vscode.ExtensionContext): void {
     { dispose: () => { disposed = true; void languageClient.stop(); } },
     vscode.workspace.onDidChangeConfiguration(event => {
       // launch.json packagePath feeds module resolution, so its edits refresh too.
-      if (event.affectsConfiguration('luaDevtools.luaPath') || event.affectsConfiguration('launch')) refresh();
+      if (event.affectsConfiguration('luaDevtools.luaPath') || event.affectsConfiguration('luaDevtools.probeNativeModules') || event.affectsConfiguration('launch')) refresh();
     }),
     vscode.workspace.onDidChangeWorkspaceFolders(refresh),
     vscode.workspace.onDidGrantWorkspaceTrust(refresh),

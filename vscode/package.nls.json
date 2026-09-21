@@ -25,6 +25,7 @@
   "view.environments.trust": "Trust this workspace to discover Lua interpreters.\n[Manage Workspace Trust](command:workbench.trust.manage)",
   "command.installPackage": "Install Lua Package…",
   "config.luarocksPath": "LuaRocks executable path or command. When empty, searches PATH for luarocks. Packages are installed into the project for the chosen interpreter.",
+  "config.probeNativeModules": "Load C modules (.so/.dll from project packages and the interpreter's cpath) in the selected interpreter to complete their members after require. Off by default because it executes third-party native code; only enable it for packages you trust.",
   "config.styluaPath": "StyLua executable path or command for Lua formatting. Empty uses stylua on PATH. Project stylua.toml settings are respected.",
   "command.upgradePackage": "Upgrade to Latest Version",
   "command.uninstallPackage": "Uninstall This Version",

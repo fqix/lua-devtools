@@ -444,6 +444,7 @@ suite('Lua DevTools end to end', function () {
         const options = await languageEnvironment('', true, [folder().uri.fsPath], () => ({ lua: ['/from-launch/?.lua'], native: ['/from-launch/?.so'] }));
         assert.equal(options.modulePaths[0].templates[0], '/from-launch/?.lua');
         assert.equal(options.modulePaths[0].ctemplates[0], '/from-launch/?.so');
+        assert.equal(options.probeNativeModules, false);
       } finally {
         await vscode.workspace.fs.delete(launchDir, { recursive: true });
         await vscode.workspace.fs.delete(moduleDir, { recursive: true });

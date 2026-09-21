@@ -53,6 +53,7 @@ VS Code 的 Lua 调试与语言服务扩展，支持 **Lua 5.1–5.5 和 LuaJIT 
 |---|---|
 | `luaDevtools.luaPath` | 解释器路径；自动查找依次尝试 `lua5.4`、Homebrew `lua@5.4`、`lua` |
 | `luaDevtools.luarocksPath` | LuaRocks 可执行文件；默认从 PATH 查找 `luarocks` |
+| `luaDevtools.probeNativeModules` | 默认关闭。在所选解释器中加载 C 模块（项目安装包、解释器 `package.cpath` 和 launch `packageCPath` 里的 `.so` / `.dll`），以补全 `require` 后的成员。这会执行第三方原生代码，只对信任的包开启 |
 | `luaDevtools.trace.server` | 语言服务日志：`off`、`messages` 或 `verbose` |
 
 自定义 `launch.json` 时，设置 `type: "lua"`、`request: "launch"` 和 `program`。可选字段包括 `args`、`cwd`、`env`、`luaPath`、`stopOnEntry`、`packagePath`、`packageCPath`。
@@ -66,7 +67,7 @@ VS Code 的 Lua 调试与语言服务扩展，支持 **Lua 5.1–5.5 和 LuaJIT 
 - 普通 launch 的主动暂停和运行中更新断点依赖内置原生辅助模块；TCP 模式通过 LuaSocket 轮询。阻塞中的 C 调用需返回 Lua，不能用 F11 进入 `os.time`、`cjson.encode` 等 C 实现。
 - LuaJIT 调试时禁用 JIT 编译。attach 需要宿主主动接入，不支持注入任意运行中的进程。
 - 引用查询和重命名覆盖词法绑定、全局变量，以及静态分析能归属到同一张表的成员（模块导出、`__index` 链、别名）。动态键（`t[name]`、`_G[name]`）、无法确定类型的值（如参数、`self`）的字段、构造函数返回的实例不会被跟踪。以下重命名会被拒绝：会造成捕获或合并绑定；嵌套表被替换，或重新赋值导致表及其别名的绑定无法静态判定；成员声明在已安装的包或工作区之外。参数提示基于静态函数声明。
-- 语言分析基于静态源码，不解析动态加载器、运行时对 `package.path` 的修改或依赖当前编辑器的 launch 变量（如 `${file}`）。不解析原生 C 实现。缺少受信任且可用的解释器时，回退到 Lua 5.4 分析。
+- 语言分析基于静态源码，不解析动态加载器、运行时对 `package.path` 的修改或依赖当前编辑器的 launch 变量（如 `${file}`）。C 模块的成员只在开启 `luaDevtools.probeNativeModules` 后可知，且没有定义位置和参数提示。缺少受信任且可用的解释器时，回退到 Lua 5.4 分析。
 
 ## 文档
 

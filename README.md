@@ -53,6 +53,7 @@ To format on save:
 |---|---|
 | `luaDevtools.luaPath` | Interpreter path; automatic lookup prefers `lua5.4`, Homebrew `lua@5.4`, then `lua` |
 | `luaDevtools.luarocksPath` | LuaRocks executable; defaults to `luarocks` on PATH |
+| `luaDevtools.probeNativeModules` | Off by default. Load C modules (`.so` / `.dll` from project packages, the interpreter's `package.cpath` and launch `packageCPath`) in the selected interpreter to complete their members after `require`. This executes third-party native code; enable it only for packages you trust |
 | `luaDevtools.trace.server` | Language-server logging: `off`, `messages` or `verbose` |
 
 For a custom `launch.json`, use `type: "lua"`, `request: "launch"` and `program`. Optional fields: `args`, `cwd`, `env`, `luaPath`, `stopOnEntry`, `packagePath` and `packageCPath`.
@@ -66,7 +67,7 @@ TCP attach supports Lua and embedded hosts that load the debugger; disconnect le
 - Pause and live breakpoint updates use the bundled native helper in ordinary launch sessions, or LuaSocket polling in TCP mode. Blocking C calls must return to Lua; F11 cannot enter C implementations such as `os.time` or `cjson.encode`.
 - LuaJIT compilation is disabled while debugging. Attach requires cooperative host setup; it cannot inject into an arbitrary process.
 - References and rename follow lexical bindings, globals and table members that static analysis can attribute to one table (module exports, `__index` chains, aliases). Dynamic keys (`t[name]`, `_G[name]`), fields of untyped values such as parameters or `self`, and instances returned by constructor functions are not followed. Renames are rejected when they would capture or merge bindings, when nested tables are replaced or reassignment makes table bindings (including aliases) uncertain, or when the member is declared in an installed package or outside the workspace. Signature help uses static function declarations.
-- Language analysis is static: dynamic loaders, runtime changes to `package.path` and editor-dependent launch variables such as `${file}` are not resolved. Native C implementations are not resolved. Without a trusted, working interpreter, analysis falls back to Lua 5.4.
+- Language analysis is static: dynamic loaders, runtime changes to `package.path` and editor-dependent launch variables such as `${file}` are not resolved. Members of C modules are only known with `luaDevtools.probeNativeModules`, and then without definitions or signatures. Without a trusted, working interpreter, analysis falls back to Lua 5.4.
 
 ## Documentation
 

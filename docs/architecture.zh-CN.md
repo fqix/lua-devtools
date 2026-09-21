@@ -145,6 +145,8 @@ flowchart TD
   probed --> items["CompletionItems<br/>':' 只保留函数"]
 ```
 
+当 `require` 找不到任何 Lua 源码且开启了 `luaDevtools.probeNativeModules` 时，`lsp/native.go` 会先查找解释器将要加载的共享库（`?.so` / `?.dll` 模板，含 `a.b` 对应 `a.so` 的 all-in-one 形式），只有文件确实存在才在所选解释器里以环境的 `LUA_PATH` / `LUA_CPATH` 执行 `pcall(require, name)` 列出导出表。结果（包括失败）按库文件（修改时间和大小）缓存。这是分析过程中唯一执行第三方代码的地方，因此默认关闭。
+
 `moduleResolver` 优先使用扩展传入的当前环境搜索路径（先是该目录下 Lua launch 配置的 `packagePath`，由扩展通过 `launch` 配置 API 读取并替换变量，再是项目依赖目录和解释器 `package.path`），再在所属工作区根目录和源文件的各级父目录下查找 `?.lua` 和 `?/init.lua`。路径按工作区隔离，未保存的打开文档优先于磁盘内容,并限制文件大小和依赖深度。这样找到的定义同时支撑跨文件的转到定义。
 
 ### CodeLens
