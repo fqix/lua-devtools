@@ -1,5 +1,8 @@
 # Lua DevTools
 
+[![VS Code Marketplace installs](https://vsmarketplacebadges.dev/installs-short/fqix.lua-devtools.svg?label=VS%20Code%20Marketplace%20installs)](https://marketplace.visualstudio.com/items?itemName=fqix.lua-devtools)
+[![Open VSX downloads](https://img.shields.io/open-vsx/dt/fqix/lua-devtools?label=Open%20VSX%20downloads)](https://open-vsx.org/extension/fqix/lua-devtools)
+
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 Lua debugging and language support for VS Code, supporting **Lua 5.1–5.5 and LuaJIT 2.1** on macOS, Linux and Windows.

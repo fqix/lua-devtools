@@ -1,5 +1,8 @@
 # Lua DevTools
 
+[![VS Code Marketplace 安装量](https://vsmarketplacebadges.dev/installs-short/fqix.lua-devtools.svg?label=VS%20Code%20Marketplace%20%E5%AE%89%E8%A3%85%E9%87%8F)](https://marketplace.visualstudio.com/items?itemName=fqix.lua-devtools)
+[![Open VSX 下载量](https://img.shields.io/open-vsx/dt/fqix/lua-devtools?label=Open%20VSX%20%E4%B8%8B%E8%BD%BD%E9%87%8F)](https://open-vsx.org/extension/fqix/lua-devtools)
+
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 VS Code 的 Lua 调试与语言服务扩展，支持 **Lua 5.1–5.5 和 LuaJIT 2.1**，适用于 macOS、Linux 和 Windows。
